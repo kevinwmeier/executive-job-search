@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Job Search Agent</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: #0d0f14; color: #e8e3d8; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1a1d24; }
+    ::-webkit-scrollbar-thumb { background: #3a3f52; border-radius: 3px; }
+    input, textarea, select { font-family: 'DM Sans', sans-serif; }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fade-up { animation: fadeUp .35s ease both; }
+    .spin { animation: spin 1s linear infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    // ── CONFIG — edit these ────────────────────────────────────────────────
+    const ANTHROPIC_API_KEY = "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";
+    const WEBHOOKS = {
+      getRoles:       "https://n8n-production-97a9.up.railway.app/webhook/get-roles",
+      updateRole:     "https://n8n-production-97a9.up.railway.app/webhook/update-role",
+      createDocument: "https://n8n-production-97a9.up.railway.app/webhook/create-document",
+    };
+    // ──────────────────────────────────────────────────────────────────────
+
+    const C = {
+      bg:"#0d0f14", surface:"#13161e", card:"#1a1d28", border:"#272b3a",
+      accent:"#c9a84c", green:"#4caf82", red:"#cf6679", blue:"#5b8dee",
+      text:"#e8e3d8", muted:"#7a7f96",
+    };
+
+    // ── API helpers ────────────────────────────────────────────────────────
+    async function getRoles() {
+      const res = await fetch(WEBHOOKS.getRoles);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const records = Array.isArray(data) ? data : [data];
+      return records.map(r => ({
+        id: r.id,
+        Title: r.Title || "",
+        Company: r.Company || "",
+        Location: r.Location || "",
+        Salary: r.Salary || "",
+        Source: r.Source || "",
+        URL: r.URL || "",
+        Summary: r.Summary || "",
+        Status: r.Status || "New",
+        FetchedDate: r.FetchedDate || "",
+        HiringContact: r.HiringContact || "",
+        HiringLinkedIn: r.HiringLinkedIn || "",
+        DocID: r.DocID || "",
+      }));
+    }
+
+    async function updateRole(recordId, status, docId = null) {
+      const body = { recordId, status };
+      if (docId) body.docId = docId;
+      const res = await fetch(WEBHOOKS.updateRole, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    async function createDocument(fields) {
+      const res = await fetch(WEBHOOKS.createDocument, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data) ? data[0] : data;
+    }
+
+    async function callClaude(messages, system = "") {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system, messages }),
+      });
+      const data = await res.json();
+      return data.content?.map(b => b.text || "").join("") || "";
+    }
+
+    // ── UI helpers ─────────────────────────────────────────────────────────
+    function Spinner({ size = 18 }) {
+      return <div style={{ width:size, height:size, border:`2px solid ${C.border}`, borderTop:`2px solid ${C.accent}`, borderRadius:"50%", display:"inline-block", flexShrink:0 }} className="spin" />;
+    }
+
+    function Tag({ label, color = C.accent }) {
+      return <span style={{ background:`${color}20`, color, border:`1px solid ${color}40`, borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, letterSpacing:.5 }}>{label}</span>;
+    }
+
+    function Btn({ children, onClick, variant="primary", disabled=false, small=false, style={} }) {
+      const base = { border:"none", cursor:disabled?"not-allowed":"pointer", borderRadius:6, fontFamily:"'DM Sans',sans-serif",
+        fontWeight:600, transition:"all .2s", display:"inline-flex", alignItems:"center", gap:6, opacity:disabled?.5:1, ...style };
+      const v = {
+        primary: { background:C.accent, color:"#0d0f14", padding:small?"6px 14px":"10px 20px", fontSize:small?12:14 },
+        ghost:   { background:"transparent", color:C.muted, border:`1px solid ${C.border}`, padding:small?"6px 14px":"10px 20px", fontSize:small?12:14 },
+        danger:  { background:`${C.red}20`, color:C.red, border:`1px solid ${C.red}40`, padding:small?"6px 12px":"8px 16px", fontSize:small?12:13 },
+        success: { background:`${C.green}20`, color:C.green, border:`1px solid ${C.green}40`, padding:small?"6px 12px":"8px 16px", fontSize:small?12:13 },
+      };
+      return <button style={{...base,...v[variant]}} onClick={onClick} disabled={disabled}>{children}</button>;
+    }
+
+    function Notice({ type="info", children }) {
+      const c = { info:C.blue, success:C.green, error:C.red, warning:C.accent }[type]||C.blue;
+      return <div style={{ background:`${c}15`, border:`1px solid ${c}30`, borderRadius:8, padding:"10px 16px", fontSize:13, color:C.text, lineHeight:1.6, marginBottom:16 }}>{children}</div>;
+    }
+
+    // ── NAV ────────────────────────────────────────────────────────────────
+    const NAV_ITEMS = [
+      { id:"roles",     label:"Role Pipeline", icon:"◎" },
+      { id:"documents", label:"Documents",     icon:"◫" },
+      { id:"setup",     label:"CV & Cover",    icon:"◧" },
+      { id:"profile",   label:"Job Profile",   icon:"◈" },
+      { id:"boards",    label:"Job Boards",    icon:"◉" },
+    ];
+
+    function Nav({ active, setActive, newCount }) {
+      return (
+        <nav style={{ width:220, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex",
+          flexDirection:"column", padding:"24px 0", minHeight:"100vh", flexShrink:0 }}>
+          <div style={{ padding:"0 20px 28px", borderBottom:`1px solid ${C.border}` }}>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:C.accent, lineHeight:1.2 }}>Executive</div>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:C.text, lineHeight:1.2 }}>Search Agent</div>
+            <div style={{ fontSize:11, color:C.muted, marginTop:6, display:"flex", alignItems:"center", gap:6 }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:C.green }} />
+              Live · n8n + Airtable
+            </div>
+          </div>
+          <div style={{ padding:"16px 12px", flex:1 }}>
+            {NAV_ITEMS.map(n => (
+              <button key={n.id} onClick={() => setActive(n.id)}
+                style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 12px", borderRadius:7,
+                  border:"none", background:active===n.id?`${C.accent}18`:"transparent",
+                  color:active===n.id?C.accent:C.muted, fontFamily:"'DM Sans',sans-serif",
+                  fontSize:13, fontWeight:active===n.id?600:400, cursor:"pointer", transition:"all .2s",
+                  textAlign:"left", marginBottom:2 }}>
+                <span style={{ fontSize:16 }}>{n.icon}</span>
+                {n.label}
+                {n.id==="roles" && newCount>0 && (
+                  <span style={{ marginLeft:"auto", background:C.accent, color:"#0d0f14", borderRadius:10,
+                    padding:"1px 7px", fontSize:11, fontWeight:700 }}>{newCount}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <div style={{ padding:"16px 20px", borderTop:`1px solid ${C.border}`, fontSize:11, color:C.muted, lineHeight:1.6 }}>
+            Powered by Claude + n8n
+          </div>
+        </nav>
+      );
+    }
+
+    // ── ROLES PANEL ────────────────────────────────────────────────────────
+    function RolesPanel({ cv, cover, setLocalDocs, setActive, setNewCount }) {
+      const [roles, setRoles] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [actionLoading, setActionLoading] = useState(null);
+      const [filter, setFilter] = useState("New");
+      const [expanded, setExpanded] = useState(null);
+      const [error, setError] = useState("");
+      const [lastRefresh, setLastRefresh] = useState(null);
+
+      const fetchRoles = useCallback(async () => {
+        setLoading(true); setError("");
+        try {
+          const data = await getRoles();
+          setRoles(data);
+          setNewCount(data.filter(r => r.Status === "New").length);
+          setLastRefresh(new Date().toLocaleTimeString());
+        } catch (e) {
+          setError(`Could not load roles: ${e.message}`);
+        }
+        setLoading(false);
+      }, [setNewCount]);
+
+      useEffect(() => { fetchRoles(); }, [fetchRoles]);
+
+      async function handleUpdateStatus(role, status) {
+        try {
+          await updateRole(role.id, status);
+          setRoles(rs => rs.map(r => r.id===role.id ? {...r, Status:status} : r));
+          if (status === "Deleted") setNewCount(n => Math.max(0, n-1));
+        } catch(e) { setError(`Update failed: ${e.message}`); }
+      }
+
+      async function handleTag(role) {
+        if (!cv.trim()) { setError("Please paste your CV in the CV & Cover tab first."); return; }
+        setActionLoading(role.id); setError("");
+        try {
+          const [clRes, rtRes, nsRes] = await Promise.all([
+            callClaude([{ role:"user", content:`Draft a tailored executive cover letter for:\n\nROLE: ${role.Title} at ${role.Company||"this company"}\nSUMMARY: ${role.Summary||""}\n\nBase it on this CV:\n${cv.slice(0,2000)}\n\nAdapt this cover letter style:\n${cover.slice(0,800)}` }],
+              "You are an executive career coach. Write a polished, confident cover letter with proper paragraph formatting."),
+            callClaude([{ role:"user", content:`List 4 specific edits to tailor this CV for ${role.Title} at ${role.Company||"this company"}.\nCV:\n${cv.slice(0,1500)}` }],
+              "You are a resume expert. Return a numbered list of specific, actionable edits."),
+            callClaude([{ role:"user", content:`Create a 5-step action plan for applying to ${role.Title} at ${role.Company||"this company"}. Include research, outreach on LinkedIn, and how to stand out.` }],
+              "Return a practical numbered action list. Be specific."),
+          ]);
+
+          const doc = await createDocument({
+            roleName: `${role.Title}${role.Company ? " — "+role.Company : ""}`,
+            roleId: role.id,
+            coverLetter: clRes,
+            resumeTips: rtRes,
+            nextSteps: nsRes,
+          });
+
+          const docId = doc?.id || "";
+          await updateRole(role.id, "Tagged", docId);
+          setRoles(rs => rs.map(r => r.id===role.id ? {...r, Status:"Tagged", DocID:docId} : r));
+          setNewCount(n => Math.max(0, n-1));
+          setLocalDocs(ds => [...ds, {
+            id: docId || Math.random().toString(36).slice(2),
+            roleName: `${role.Title}${role.Company ? " — "+role.Company : ""}`,
+            coverLetter: clRes, resumeTips: rtRes, nextSteps: nsRes,
+            createdDate: new Date().toLocaleDateString(),
+          }]);
+        } catch(e) { setError(`Tag failed: ${e.message}`); }
+        setActionLoading(null);
+      }
+
+      const filtered = roles.filter(r => {
+        if (r.Status === "Deleted") return false;
+        if (filter === "all") return true;
+        return r.Status === filter;
+      });
+
+      const statusColor = { New:C.blue, Tagged:C.green, Applied:C.accent };
+      const counts = { New:0, Tagged:0, Applied:0, all:0 };
+      roles.forEach(r => { if (r.Status!=="Deleted") { counts.all++; if (counts[r.Status]!==undefined) counts[r.Status]++; }});
+
+      return (
+        <div style={{ padding:32 }} className="fade-up">
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20 }}>
+            <div>
+              <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:4 }}>Role Pipeline</h2>
+              <p style={{ color:C.muted, fontSize:14 }}>
+                {lastRefresh ? `Live from Airtable · Refreshed ${lastRefresh}` : "Loading roles from Airtable…"}
+              </p>
+            </div>
+            <Btn variant="ghost" onClick={fetchRoles} disabled={loading}>
+              {loading ? <><Spinner size={14}/> Loading…</> : "↻ Refresh"}
+            </Btn>
+          </div>
+
+          {error && <Notice type="error">{error}</Notice>}
+
+          <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
+            {["all","New","Tagged","Applied"].map(f => (
+              <button key={f} onClick={() => setFilter(f)}
+                style={{ padding:"6px 16px", borderRadius:20, border:`1px solid ${filter===f?C.accent:C.border}`,
+                  background:filter===f?`${C.accent}20`:"transparent", color:filter===f?C.accent:C.muted,
+                  cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif",
+                  display:"flex", alignItems:"center", gap:6 }}>
+                {f==="all"?"All":f}
+                <span style={{ background:filter===f?`${C.accent}40`:C.border, borderRadius:10, padding:"1px 7px", fontSize:11 }}>{counts[f]}</span>
+              </button>
+            ))}
+          </div>
+
+          {filtered.length === 0 && !loading && (
+            <div style={{ textAlign:"center", padding:"60px 20px", color:C.muted }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>◎</div>
+              <div style={{ fontSize:14, maxWidth:400, margin:"0 auto", lineHeight:1.7 }}>
+                {roles.length === 0
+                  ? "No roles yet. Your n8n workflow runs daily at 7am. Click Test Workflow in n8n to populate now."
+                  : `No ${filter} roles right now.`}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {filtered.map(role => (
+              <div key={role.id} style={{ background:C.card, border:`1px solid ${expanded===role.id?C.accent:C.border}`,
+                borderRadius:10, overflow:"hidden", transition:"border-color .2s" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 18px", cursor:"pointer" }}
+                  onClick={() => setExpanded(expanded===role.id ? null : role.id)}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4, flexWrap:"wrap" }}>
+                      <span style={{ fontSize:15, fontWeight:600 }}>{role.Title || "Untitled Role"}</span>
+                      <Tag label={role.Status||"New"} color={statusColor[role.Status]||C.blue} />
+                      {role.DocID && <Tag label="Docs Ready" color={C.green} />}
+                    </div>
+                    <div style={{ fontSize:12, color:C.muted }}>
+                      {[role.Company, role.Location, role.Salary, role.Source].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                    {role.Status === "New" && (
+                      <>
+                        <Btn variant="success" small onClick={e => { e.stopPropagation(); handleTag(role); }} disabled={actionLoading===role.id}>
+                          {actionLoading===role.id ? <Spinner size={13}/> : "★ Tag"}
+                        </Btn>
+                        <Btn variant="danger" small onClick={e => { e.stopPropagation(); handleUpdateStatus(role, "Deleted"); }}>✕</Btn>
+                      </>
+                    )}
+                    {role.Status === "Tagged" && (
+                      <Btn variant="ghost" small onClick={e => { e.stopPropagation(); handleUpdateStatus(role, "Applied"); }}>Mark Applied</Btn>
+                    )}
+                    {role.DocID && (
+                      <Btn variant="ghost" small onClick={e => { e.stopPropagation(); setActive("documents"); }}>Docs →</Btn>
+                    )}
+                  </div>
+                </div>
+                {expanded === role.id && (
+                  <div style={{ padding:"0 18px 18px", borderTop:`1px solid ${C.border}` }}>
+                    {role.Summary && <p style={{ fontSize:13, color:C.text, lineHeight:1.75, margin:"14px 0 12px" }}>{role.Summary}</p>}
+                    {role.URL && (
+                      <a href={role.URL} target="_blank" rel="noreferrer"
+                        style={{ fontSize:12, color:C.blue, display:"inline-block", marginBottom:12 }}>
+                        View Original Posting →
+                      </a>
+                    )}
+                    {role.HiringContact && (
+                      <div style={{ background:C.surface, borderRadius:7, padding:"10px 14px", fontSize:12, marginBottom:8 }}>
+                        <span style={{ color:C.accent, fontWeight:600 }}>Hiring Contact: </span>
+                        <span style={{ color:C.text }}>{role.HiringContact}</span>
+                        {role.HiringLinkedIn && <> · <a href={role.HiringLinkedIn} target="_blank" rel="noreferrer" style={{ color:C.blue }}>LinkedIn</a></>}
+                      </div>
+                    )}
+                    <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Fetched: {role.FetchedDate} · Source: {role.Source}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── DOCUMENTS PANEL ────────────────────────────────────────────────────
+    function DocumentsPanel({ localDocs }) {
+      const [selected, setSelected] = useState(null);
+      const [tab, setTab] = useState("cover");
+
+      useEffect(() => {
+        if (localDocs.length > 0 && !selected) setSelected(localDocs[localDocs.length-1].id);
+      }, [localDocs]);
+
+      const doc = localDocs.find(d => d.id === selected);
+
+      return (
+        <div style={{ padding:32, display:"flex", gap:20, height:"calc(100vh - 60px)" }} className="fade-up">
+          <div style={{ width:260, flexShrink:0, display:"flex", flexDirection:"column" }}>
+            <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:22, marginBottom:6 }}>Documents</h2>
+            <p style={{ color:C.muted, fontSize:13, marginBottom:16, lineHeight:1.6 }}>AI-generated materials for each tagged role.</p>
+            {localDocs.length === 0 && <Notice type="info">No documents yet. Tag a role to generate tailored materials.</Notice>}
+            <div style={{ display:"flex", flexDirection:"column", gap:8, overflow:"auto" }}>
+              {localDocs.map(d => (
+                <div key={d.id} onClick={() => { setSelected(d.id); setTab("cover"); }}
+                  style={{ background:selected===d.id?`${C.accent}18`:C.card,
+                    border:`1px solid ${selected===d.id?C.accent:C.border}`,
+                    borderRadius:8, padding:"10px 14px", cursor:"pointer", transition:"all .2s" }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:C.text, marginBottom:2, lineHeight:1.4 }}>{d.roleName}</div>
+                  <div style={{ fontSize:11, color:C.muted, marginBottom:8 }}>{d.createdDate}</div>
+                  <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                    <Tag label="Cover Letter" color={C.blue} />
+                    <Tag label="CV Edits" color={C.green} />
+                    <Tag label="Next Steps" color={C.accent} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {doc && (
+            <div style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:10,
+              overflow:"hidden", display:"flex", flexDirection:"column" }}>
+              <div style={{ padding:"14px 20px", borderBottom:`1px solid ${C.border}`, display:"flex", gap:4, alignItems:"center", flexWrap:"wrap" }}>
+                {[["cover","Cover Letter"],["resume","CV Edits"],["nextsteps","Next Steps"]].map(([k,l]) => (
+                  <button key={k} onClick={() => setTab(k)}
+                    style={{ padding:"6px 14px", borderRadius:6, border:"none", fontFamily:"'DM Sans',sans-serif",
+                      background:tab===k?C.accent:"transparent", color:tab===k?"#0d0f14":C.muted,
+                      cursor:"pointer", fontSize:12, fontWeight:600 }}>{l}</button>
+                ))}
+                <div style={{ marginLeft:"auto", fontSize:12, color:C.muted }}>{doc.roleName}</div>
+              </div>
+              <div style={{ flex:1, overflow:"auto", padding:28 }}>
+                <pre style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, lineHeight:1.9,
+                  color:C.text, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>
+                  {tab==="cover" && (doc.coverLetter || "No cover letter generated.")}
+                  {tab==="resume" && (doc.resumeTips || "No CV tips generated.")}
+                  {tab==="nextsteps" && (doc.nextSteps || "No next steps generated.")}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── SETUP PANEL ────────────────────────────────────────────────────────
+    function SetupPanel({ cv, setCv, cover, setCover }) {
+      const [msg, setMsg] = useState("");
+      const [loading, setLoading] = useState(false);
+
+      async function analyze() {
+        if (!cv.trim()) return;
+        setLoading(true);
+        const res = await callClaude([{ role:"user", content:`Briefly confirm you've read this CV and list the candidate's top 3 executive strengths in 2 sentences:\n\n${cv.slice(0,2000)}` }]);
+        setMsg(res); setLoading(false);
+      }
+
+      return (
+        <div style={{ padding:32, maxWidth:900 }} className="fade-up">
+          <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:6 }}>CV & Cover Letter</h2>
+          <p style={{ color:C.muted, fontSize:14, marginBottom:24 }}>Your master documents. Used to generate tailored applications when you tag a role.</p>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+            <div>
+              <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.5, display:"block", marginBottom:8 }}>MASTER CV / RÉSUMÉ</label>
+              <textarea value={cv} onChange={e => setCv(e.target.value)} placeholder="Paste your full CV here…"
+                style={{ width:"100%", height:400, background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
+                  color:C.text, padding:14, fontSize:13, lineHeight:1.7, resize:"vertical" }} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.5, display:"block", marginBottom:8 }}>SAMPLE COVER LETTER</label>
+              <textarea value={cover} onChange={e => setCover(e.target.value)} placeholder="Paste a sample cover letter…"
+                style={{ width:"100%", height:400, background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
+                  color:C.text, padding:14, fontSize:13, lineHeight:1.7, resize:"vertical" }} />
+            </div>
+          </div>
+          <div style={{ marginTop:16, display:"flex", gap:12, alignItems:"flex-start" }}>
+            <Btn onClick={analyze} disabled={loading || !cv.trim()}>
+              {loading ? <><Spinner/> Analyzing…</> : "✦ Analyze CV"}
+            </Btn>
+            {msg && <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}30`, borderRadius:8,
+              padding:"10px 16px", fontSize:13, color:C.text, lineHeight:1.6, flex:1 }}>{msg}</div>}
+          </div>
+        </div>
+      );
+    }
+
+    // ── PROFILE PANEL ──────────────────────────────────────────────────────
+    const DEFAULT_PROFILE = {
+      titles:"Chief Operating Officer, COO, VP Operations",
+      responsibilities:"Operational strategy, P&L ownership, cross-functional leadership",
+      locations:"BC, Canada (remote/hybrid considered)",
+      salary:"$300,000–$500,000 CAD total comp",
+      industries:"Tech, FinTech, Healthcare, Professional Services",
+      companySize:"200–5,000 employees",
+      notes:"",
+    };
+
+    function ProfilePanel({ profile, setProfile, cv }) {
+      const [loading, setLoading] = useState(false);
+
+      async function generate() {
+        if (!cv.trim()) { alert("Paste your CV in the CV & Cover tab first."); return; }
+        setLoading(true);
+        const sys = `Return ONLY a JSON object with keys: titles, responsibilities, locations, salary, industries, companySize, notes. No markdown.`;
+        const res = await callClaude([{ role:"user", content:`Based on this CV, suggest an ideal executive job search profile:\n\n${cv.slice(0,3000)}` }], sys);
+        try { setProfile(p => ({...p, ...JSON.parse(res.replace(/```json|```/g,"").trim())})); } catch {}
+        setLoading(false);
+      }
+
+      const Field = ({ label, k, multiline=false }) => (
+        <div style={{ marginBottom:18 }}>
+          <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:6 }}>{label}</label>
+          {multiline
+            ? <textarea value={profile[k]||""} onChange={e => setProfile(p=>({...p,[k]:e.target.value}))} rows={3}
+                style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:10, fontSize:13, lineHeight:1.6, resize:"vertical" }} />
+            : <input value={profile[k]||""} onChange={e => setProfile(p=>({...p,[k]:e.target.value}))}
+                style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:"10px 12px", fontSize:13 }} />
+          }
+        </div>
+      );
+
+      return (
+        <div style={{ padding:32, maxWidth:720 }} className="fade-up">
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:28 }}>
+            <div>
+              <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:4 }}>Job Search Profile</h2>
+              <p style={{ color:C.muted, fontSize:14 }}>Defines what your n8n workflows scrape for each day.</p>
+            </div>
+            <Btn onClick={generate} disabled={loading}>{loading ? <><Spinner/> Generating…</> : "✦ Generate from CV"}</Btn>
+          </div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
+            <Field label="TARGET TITLES" k="titles" />
+            <Field label="KEY RESPONSIBILITIES" k="responsibilities" multiline />
+            <Field label="PREFERRED LOCATIONS" k="locations" />
+            <Field label="TARGET COMPENSATION" k="salary" />
+            <Field label="TARGET INDUSTRIES" k="industries" />
+            <Field label="COMPANY SIZE" k="companySize" />
+            <Field label="ADDITIONAL NOTES" k="notes" multiline />
+          </div>
+        </div>
+      );
+    }
+
+    // ── BOARDS PANEL ───────────────────────────────────────────────────────
+    const DEFAULT_BOARDS = [
+      { id:"b1", name:"Google Alerts — COO roles", url:"RSS feed", active:true, type:"rss" },
+      { id:"b2", name:"Boyden Canada", url:"https://boyden.thriveapp.ly/api/v1/job_listings", active:true, type:"api" },
+      { id:"b3", name:"Spencer Stuart", url:"https://www.spencerstuart.com/who-we-are/careers", active:true, type:"scrape" },
+      { id:"b4", name:"Korn Ferry", url:"https://www.kornferry.com/careers", active:false, type:"scrape" },
+    ];
+
+    function BoardsPanel({ boards, setBoards, profile }) {
+      const [suggesting, setSuggesting] = useState(false);
+      const [suggestions, setSuggestions] = useState([]);
+      const [newName, setNewName] = useState("");
+      const [newUrl, setNewUrl] = useState("");
+      const uid = () => Math.random().toString(36).slice(2,8);
+
+      async function suggest() {
+        setSuggesting(true); setSuggestions([]);
+        const sys = `Return ONLY a JSON array of objects with keys: name, url, type ("rss", "api", or "scrape"). No markdown.`;
+        const res = await callClaude([{ role:"user", content:`Suggest 6 executive job boards or search firms for: ${profile.titles||"senior executive"} roles in ${profile.industries||"various industries"}.` }], sys);
+        try { setSuggestions(JSON.parse(res.replace(/```json|```/g,"").trim())); } catch {}
+        setSuggesting(false);
+      }
+
+      return (
+        <div style={{ padding:32, maxWidth:760 }} className="fade-up">
+          <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:6 }}>Job Boards</h2>
+          <p style={{ color:C.muted, fontSize:14, marginBottom:16 }}>Track active boards. Add new ones here then create matching nodes in n8n.</p>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:20 }}>
+            {boards.map((b,i) => (
+              <div key={b.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 18px",
+                borderBottom:i<boards.length-1?`1px solid ${C.border}`:"none" }}>
+                <div onClick={() => setBoards(bs => bs.map(x => x.id===b.id?{...x,active:!x.active}:x))}
+                  style={{ width:36, height:20, borderRadius:10, background:b.active?C.accent:C.border,
+                    cursor:"pointer", position:"relative", transition:"background .2s", flexShrink:0 }}>
+                  <div style={{ width:14, height:14, borderRadius:7, background:"white", position:"absolute",
+                    top:3, left:b.active?19:3, transition:"left .2s" }} />
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:b.active?C.text:C.muted }}>{b.name}</div>
+                  <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{b.url}</div>
+                </div>
+                <Tag label={b.type.toUpperCase()} color={b.type==="rss"?C.green:b.type==="api"?C.accent:C.blue} />
+                <Btn variant="danger" small onClick={() => setBoards(bs => bs.filter(x => x.id!==b.id))}>✕</Btn>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:"flex", gap:8, marginBottom:24 }}>
+            <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Board name"
+              style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:"9px 12px", fontSize:13 }} />
+            <input value={newUrl} onChange={e=>setNewUrl(e.target.value)} placeholder="URL or RSS feed"
+              style={{ flex:2, background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:"9px 12px", fontSize:13 }} />
+            <Btn onClick={() => { if(!newName.trim()) return; setBoards(bs=>[...bs,{id:uid(),name:newName,url:newUrl,active:true,type:"scrape"}]); setNewName(""); setNewUrl(""); }}
+              disabled={!newName.trim()}>+ Add</Btn>
+          </div>
+          <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:20 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontSize:13, fontWeight:600 }}>AI Board Suggestions</div>
+              <Btn variant="ghost" small onClick={suggest} disabled={suggesting}>
+                {suggesting ? <><Spinner size={14}/> Finding…</> : "✦ Suggest Boards"}
+              </Btn>
+            </div>
+            {suggestions.length > 0 && (
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {suggestions.map((s,i) => (
+                  <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:7, padding:"8px 14px", display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:13 }}>{s.name}</span>
+                    <Btn variant="success" small onClick={() => setBoards(bs=>[...bs,{id:uid(),name:s.name,url:s.url,active:true,type:s.type||"scrape"}])}>+ Add</Btn>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ── ROOT APP ───────────────────────────────────────────────────────────
+    function App() {
+      const [active, setActive] = useState("roles");
+      const [cv, setCv] = useState("");
+      const [cover, setCover] = useState("");
+      const [profile, setProfile] = useState(DEFAULT_PROFILE);
+      const [boards, setBoards] = useState(DEFAULT_BOARDS);
+      const [localDocs, setLocalDocs] = useState([]);
+      const [newCount, setNewCount] = useState(0);
+
+      return (
+        <div style={{ display:"flex", minHeight:"100vh", background:C.bg }}>
+          <Nav active={active} setActive={setActive} newCount={newCount} />
+          <main style={{ flex:1, overflow:"auto" }}>
+            {active==="roles"     && <RolesPanel cv={cv} cover={cover} setLocalDocs={setLocalDocs} setActive={setActive} setNewCount={setNewCount} />}
+            {active==="documents" && <DocumentsPanel localDocs={localDocs} />}
+            {active==="setup"     && <SetupPanel cv={cv} setCv={setCv} cover={cover} setCover={setCover} />}
+            {active==="profile"   && <ProfilePanel profile={profile} setProfile={setProfile} cv={cv} />}
+            {active==="boards"    && <BoardsPanel boards={boards} setBoards={setBoards} profile={profile} />}
+          </main>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

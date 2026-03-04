@@ -27,14 +27,20 @@
   <script type="text/babel">
     const { useState, useEffect, useCallback } = React;
 
-    // ── CONFIG — edit these ────────────────────────────────────────────────
-    const ANTHROPIC_API_KEY = "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";
+    // ── CONFIG ─────────────────────────────────────────────────────────────
     const WEBHOOKS = {
       getRoles:       "https://n8n-production-97a9.up.railway.app/webhook/get-roles",
       updateRole:     "https://n8n-production-97a9.up.railway.app/webhook/update-role",
       createDocument: "https://n8n-production-97a9.up.railway.app/webhook/create-document",
     };
-    // ──────────────────────────────────────────────────────────────────────
+
+    // ── localStorage helpers ───────────────────────────────────────────────
+    function load(key, fallback) {
+      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+    }
+    function save(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
 
     const C = {
       bg:"#0d0f14", surface:"#13161e", card:"#1a1d28", border:"#272b3a",
@@ -89,17 +95,20 @@
     }
 
     async function callClaude(messages, system = "") {
+      const apiKey = load("anthropic_api_key", "");
+      if (!apiKey) throw new Error("No API key set. Go to Settings tab to add your Anthropic API key.");
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_API_KEY,
+          "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system, messages }),
       });
       const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
       return data.content?.map(b => b.text || "").join("") || "";
     }
 
@@ -136,6 +145,7 @@
       { id:"setup",     label:"CV & Cover",    icon:"◧" },
       { id:"profile",   label:"Job Profile",   icon:"◈" },
       { id:"boards",    label:"Job Boards",    icon:"◉" },
+      { id:"settings",  label:"Settings",      icon:"◌" },
     ];
 
     function Nav({ active, setActive, newCount }) {
@@ -412,6 +422,52 @@
       );
     }
 
+    // ── SETTINGS PANEL ────────────────────────────────────────────────────
+    function SettingsPanel() {
+      const [apiKey, setApiKey] = useState(load("anthropic_api_key", ""));
+      const [saved, setSaved] = useState(false);
+
+      function handleSave() {
+        save("anthropic_api_key", apiKey.trim());
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      }
+
+      return (
+        <div style={{ padding:32, maxWidth:600 }} className="fade-up">
+          <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:6 }}>Settings</h2>
+          <p style={{ color:C.muted, fontSize:14, marginBottom:28 }}>Configure your API key. Saved locally in your browser — never sent anywhere except Anthropic.</p>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
+            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:8 }}>ANTHROPIC API KEY</label>
+            <p style={{ fontSize:12, color:C.muted, marginBottom:12, lineHeight:1.6 }}>
+              Get your key at <a href="https://console.anthropic.com/settings/keys" target="_blank" style={{ color:C.blue }}>console.anthropic.com</a> → API Keys → Create Key
+            </p>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder="sk-ant-..."
+              style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:7,
+                color:C.text, padding:"10px 12px", fontSize:13, marginBottom:16 }}
+            />
+            <Btn onClick={handleSave} disabled={!apiKey.trim()}>
+              {saved ? "✓ Saved!" : "Save API Key"}
+            </Btn>
+            {apiKey && <span style={{ marginLeft:12, fontSize:12, color:C.green }}>● Key is set</span>}
+          </div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:20 }}>
+            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>N8N WEBHOOKS</label>
+            {Object.entries(WEBHOOKS).map(([k,v]) => (
+              <div key={k} style={{ marginBottom:8, fontSize:12 }}>
+                <span style={{ color:C.muted, marginRight:8 }}>{k}:</span>
+                <span style={{ color:C.text }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
     // ── SETUP PANEL ────────────────────────────────────────────────────────
     function SetupPanel({ cv, setCv, cover, setCover }) {
       const [msg, setMsg] = useState("");
@@ -420,8 +476,11 @@
       async function analyze() {
         if (!cv.trim()) return;
         setLoading(true);
-        const res = await callClaude([{ role:"user", content:`Briefly confirm you've read this CV and list the candidate's top 3 executive strengths in 2 sentences:\n\n${cv.slice(0,2000)}` }]);
-        setMsg(res); setLoading(false);
+        try {
+          const res = await callClaude([{ role:"user", content:`Briefly confirm you've read this CV and list the candidate's top 3 executive strengths in 2 sentences:\n\n${cv.slice(0,2000)}` }]);
+          setMsg(res);
+        } catch(e) { setMsg("Error: " + e.message); }
+        setLoading(false);
       }
 
       return (
@@ -589,22 +648,36 @@
     // ── ROOT APP ───────────────────────────────────────────────────────────
     function App() {
       const [active, setActive] = useState("roles");
-      const [cv, setCv] = useState("");
-      const [cover, setCover] = useState("");
-      const [profile, setProfile] = useState(DEFAULT_PROFILE);
-      const [boards, setBoards] = useState(DEFAULT_BOARDS);
-      const [localDocs, setLocalDocs] = useState([]);
+      const [cv, setCv] = useState(() => load("cv", ""));
+      const [cover, setCover] = useState(() => load("cover", ""));
+      const [profile, setProfile] = useState(() => load("profile", DEFAULT_PROFILE));
+      const [boards, setBoards] = useState(() => load("boards", DEFAULT_BOARDS));
+      const [localDocs, setLocalDocs] = useState(() => load("localDocs", []));
       const [newCount, setNewCount] = useState(0);
+
+      // Persist to localStorage on every change
+      useEffect(() => save("cv", cv), [cv]);
+      useEffect(() => save("cover", cover), [cover]);
+      useEffect(() => save("profile", profile), [profile]);
+      useEffect(() => save("boards", boards), [boards]);
+      useEffect(() => save("localDocs", localDocs), [localDocs]);
+
+      // Show settings first if no API key set
+      const hasKey = !!load("anthropic_api_key", "");
+      const [active2, setActive2] = useState(hasKey ? "roles" : "settings");
+      const currentTab = active2;
+      const setTab = setActive2;
 
       return (
         <div style={{ display:"flex", minHeight:"100vh", background:C.bg }}>
-          <Nav active={active} setActive={setActive} newCount={newCount} />
+          <Nav active={currentTab} setActive={setTab} newCount={newCount} />
           <main style={{ flex:1, overflow:"auto" }}>
-            {active==="roles"     && <RolesPanel cv={cv} cover={cover} setLocalDocs={setLocalDocs} setActive={setActive} setNewCount={setNewCount} />}
-            {active==="documents" && <DocumentsPanel localDocs={localDocs} />}
-            {active==="setup"     && <SetupPanel cv={cv} setCv={setCv} cover={cover} setCover={setCover} />}
-            {active==="profile"   && <ProfilePanel profile={profile} setProfile={setProfile} cv={cv} />}
-            {active==="boards"    && <BoardsPanel boards={boards} setBoards={setBoards} profile={profile} />}
+            {currentTab==="roles"     && <RolesPanel cv={cv} cover={cover} setLocalDocs={setLocalDocs} setActive={setTab} setNewCount={setNewCount} />}
+            {currentTab==="documents" && <DocumentsPanel localDocs={localDocs} />}
+            {currentTab==="setup"     && <SetupPanel cv={cv} setCv={setCv} cover={cover} setCover={setCover} />}
+            {currentTab==="profile"   && <ProfilePanel profile={profile} setProfile={setProfile} cv={cv} />}
+            {currentTab==="boards"    && <BoardsPanel boards={boards} setBoards={setBoards} profile={profile} />}
+            {currentTab==="settings"  && <SettingsPanel />}
           </main>
         </div>
       );

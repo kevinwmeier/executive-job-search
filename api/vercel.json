@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" }
+  ]
+}
+```
+
+This ensures Vercel routes API calls correctly.
+
+---
+
+## Quick Test
+
+Once the file structure looks right, open this in your browser:
+```
+https://your-vercel-url.vercel.app/api/claude

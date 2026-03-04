@@ -95,20 +95,15 @@
     }
 
     async function callClaude(messages, system = "") {
-      const apiKey = load("anthropic_api_key", "");
-      if (!apiKey) throw new Error("No API key set. Go to Settings tab to add your Anthropic API key.");
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const body = { model: "claude-sonnet-4-20250514", max_tokens: 1000, messages };
+      if (system) body.system = system;
+      const res = await fetch("/api/claude", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system, messages }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
+      if (data.error) throw new Error(`API error: ${data.error.message || JSON.stringify(data.error)}`);
       return data.content?.map(b => b.text || "").join("") || "";
     }
 
@@ -424,43 +419,26 @@
 
     // ── SETTINGS PANEL ────────────────────────────────────────────────────
     function SettingsPanel() {
-      const [apiKey, setApiKey] = useState(load("anthropic_api_key", ""));
-      const [saved, setSaved] = useState(false);
-
-      function handleSave() {
-        save("anthropic_api_key", apiKey.trim());
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
-      }
-
       return (
         <div style={{ padding:32, maxWidth:600 }} className="fade-up">
           <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:6 }}>Settings</h2>
-          <p style={{ color:C.muted, fontSize:14, marginBottom:28 }}>Configure your API key. Saved locally in your browser — never sent anywhere except Anthropic.</p>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
-            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:8 }}>ANTHROPIC API KEY</label>
-            <p style={{ fontSize:12, color:C.muted, marginBottom:12, lineHeight:1.6 }}>
-              Get your key at <a href="https://console.anthropic.com/settings/keys" target="_blank" style={{ color:C.blue }}>console.anthropic.com</a> → API Keys → Create Key
+          <p style={{ color:C.muted, fontSize:14, marginBottom:28 }}>System configuration and active webhooks.</p>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginBottom:20 }}>
+            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>AI ENGINE</label>
+            <div style={{ display:"flex", alignItems:"center", gap:10, fontSize:13 }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:C.green }} />
+              <span style={{ color:C.text }}>Claude API via Vercel proxy</span>
+            </div>
+            <p style={{ fontSize:12, color:C.muted, marginTop:8, lineHeight:1.6 }}>
+              API key is stored securely in Vercel environment variables. To update it, go to your Vercel project → Settings → Environment Variables.
             </p>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder="sk-ant-..."
-              style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:7,
-                color:C.text, padding:"10px 12px", fontSize:13, marginBottom:16 }}
-            />
-            <Btn onClick={handleSave} disabled={!apiKey.trim()}>
-              {saved ? "✓ Saved!" : "Save API Key"}
-            </Btn>
-            {apiKey && <span style={{ marginLeft:12, fontSize:12, color:C.green }}>● Key is set</span>}
           </div>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:20 }}>
-            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>N8N WEBHOOKS</label>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
+            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>ACTIVE WEBHOOKS</label>
             {Object.entries(WEBHOOKS).map(([k,v]) => (
-              <div key={k} style={{ marginBottom:8, fontSize:12 }}>
-                <span style={{ color:C.muted, marginRight:8 }}>{k}:</span>
-                <span style={{ color:C.text }}>{v}</span>
+              <div key={k} style={{ marginBottom:10, fontSize:12 }}>
+                <div style={{ color:C.accent, fontWeight:600, marginBottom:2 }}>{k}</div>
+                <div style={{ color:C.muted, wordBreak:"break-all" }}>{v}</div>
               </div>
             ))}
           </div>

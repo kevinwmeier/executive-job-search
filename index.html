@@ -460,8 +460,7 @@
             </div>
             {(!n8nStatus || !n8nStatus.ok) && n8nStatus !== "checking" && (
               <p style={{ fontSize:12, color:C.muted, lineHeight:1.6 }}>
-                To enable scraper toggling and profile sync, add <span style={{ color:C.accent, fontWeight:600 }}>N8N_API_KEY</span> to
-                Vercel → Settings → Environment Variables. Generate the key in n8n under Settings → n8n API → Create API Key.
+                {n8nStatus?.hint || <>To enable scraper toggling and profile sync, add <span style={{ color:C.accent, fontWeight:600 }}>N8N_API_KEY</span> to Vercel → Settings → Environment Variables. Generate the key in n8n under Settings → n8n API → Create API Key.</>}
               </p>
             )}
           </div>

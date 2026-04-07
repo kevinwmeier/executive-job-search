@@ -550,18 +550,12 @@
         setTimeout(() => setSyncResult(null), 8000);
       }
 
-      const Field = ({ label, k, multiline=false, hint="" }) => (
-        <div style={{ marginBottom:18 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:6 }}>
-            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6 }}>{label}</label>
-            {hint && <span style={{ fontSize:11, color:C.muted }}>{hint}</span>}
-          </div>
-          {multiline
-            ? <textarea value={profile[k]||""} onChange={e => setProfile(p=>({...p,[k]:e.target.value}))} rows={3}
-                style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:10, fontSize:13, lineHeight:1.6, resize:"vertical" }} />
-            : <input value={profile[k]||""} onChange={e => setProfile(p=>({...p,[k]:e.target.value}))}
-                style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:"10px 12px", fontSize:13 }} />
-          }
+      const iStyle = { width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:"10px 12px", fontSize:13 };
+      const taStyle = { width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:10, fontSize:13, lineHeight:1.6, resize:"vertical" };
+      const lbRow = (label, hint) => (
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:6 }}>
+          <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6 }}>{label}</label>
+          {hint && <span style={{ fontSize:11, color:C.muted }}>{hint}</span>}
         </div>
       );
 
@@ -612,13 +606,34 @@
           )}
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
-            <Field label="TARGET TITLES" k="titles" hint="comma-separated · synced to scrapers" />
-            <Field label="KEY RESPONSIBILITIES" k="responsibilities" multiline />
-            <Field label="PREFERRED LOCATIONS" k="locations" hint="comma-separated · synced to scrapers" />
-            <Field label="TARGET COMPENSATION" k="salary" />
-            <Field label="TARGET INDUSTRIES" k="industries" />
-            <Field label="COMPANY SIZE" k="companySize" />
-            <Field label="ADDITIONAL NOTES" k="notes" multiline />
+            <div style={{ marginBottom:18 }}>
+              {lbRow("TARGET TITLES", "comma-separated · synced to scrapers")}
+              <input value={profile.titles||""} onChange={e => setProfile(p=>({...p, titles:e.target.value}))} style={iStyle} />
+            </div>
+            <div style={{ marginBottom:18 }}>
+              {lbRow("KEY RESPONSIBILITIES")}
+              <textarea value={profile.responsibilities||""} onChange={e => setProfile(p=>({...p, responsibilities:e.target.value}))} rows={3} style={taStyle} />
+            </div>
+            <div style={{ marginBottom:18 }}>
+              {lbRow("PREFERRED LOCATIONS", "comma-separated · synced to scrapers")}
+              <input value={profile.locations||""} onChange={e => setProfile(p=>({...p, locations:e.target.value}))} style={iStyle} />
+            </div>
+            <div style={{ marginBottom:18 }}>
+              {lbRow("TARGET COMPENSATION")}
+              <input value={profile.salary||""} onChange={e => setProfile(p=>({...p, salary:e.target.value}))} style={iStyle} />
+            </div>
+            <div style={{ marginBottom:18 }}>
+              {lbRow("TARGET INDUSTRIES")}
+              <input value={profile.industries||""} onChange={e => setProfile(p=>({...p, industries:e.target.value}))} style={iStyle} />
+            </div>
+            <div style={{ marginBottom:18 }}>
+              {lbRow("COMPANY SIZE")}
+              <input value={profile.companySize||""} onChange={e => setProfile(p=>({...p, companySize:e.target.value}))} style={iStyle} />
+            </div>
+            <div style={{ marginBottom:0 }}>
+              {lbRow("ADDITIONAL NOTES")}
+              <textarea value={profile.notes||""} onChange={e => setProfile(p=>({...p, notes:e.target.value}))} rows={3} style={taStyle} />
+            </div>
           </div>
         </div>
       );

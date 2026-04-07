@@ -521,6 +521,8 @@
 
     function ProfilePanel({ profile, setProfile, cv }) {
       const [loading, setLoading] = useState(false);
+      const [syncing, setSyncing] = useState(false);
+      const [syncResult, setSyncResult] = useState(null);
 
       async function generate() {
         if (!cv.trim()) { alert("Paste your CV in the CV & Cover tab first."); return; }
@@ -531,9 +533,29 @@
         setLoading(false);
       }
 
-      const Field = ({ label, k, multiline=false }) => (
+      async function syncScrapers() {
+        setSyncing(true); setSyncResult(null);
+        try {
+          const res = await fetch("/api/sync-profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ titles: profile.titles, locations: profile.locations }),
+          });
+          const data = await res.json();
+          setSyncResult({ ok: res.ok && data.success, data });
+        } catch(e) {
+          setSyncResult({ ok: false, data: { summary: e.message } });
+        }
+        setSyncing(false);
+        setTimeout(() => setSyncResult(null), 8000);
+      }
+
+      const Field = ({ label, k, multiline=false, hint="" }) => (
         <div style={{ marginBottom:18 }}>
-          <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:6 }}>{label}</label>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:6 }}>
+            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6 }}>{label}</label>
+            {hint && <span style={{ fontSize:11, color:C.muted }}>{hint}</span>}
+          </div>
           {multiline
             ? <textarea value={profile[k]||""} onChange={e => setProfile(p=>({...p,[k]:e.target.value}))} rows={3}
                 style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:10, fontSize:13, lineHeight:1.6, resize:"vertical" }} />
@@ -548,14 +570,51 @@
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:28 }}>
             <div>
               <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:4 }}>Job Search Profile</h2>
-              <p style={{ color:C.muted, fontSize:14 }}>Defines what your n8n workflows scrape for each day.</p>
+              <p style={{ color:C.muted, fontSize:14 }}>Target titles and locations are pushed directly to all active n8n scrapers.</p>
             </div>
-            <Btn onClick={generate} disabled={loading}>{loading ? <><Spinner/> Generating…</> : "✦ Generate from CV"}</Btn>
+            <div style={{ display:"flex", gap:8 }}>
+              <Btn onClick={generate} disabled={loading || syncing} variant="ghost">
+                {loading ? <><Spinner/> Generating…</> : "✦ Generate from CV"}
+              </Btn>
+              <Btn onClick={syncScrapers} disabled={syncing || loading}>
+                {syncing ? <><Spinner/> Syncing…</> : "⇅ Sync to Scrapers"}
+              </Btn>
+            </div>
           </div>
+
+          {syncResult && (
+            <div style={{ marginBottom:20, background: syncResult.ok ? `${C.green}15` : `${C.red}15`,
+              border:`1px solid ${syncResult.ok ? C.green : C.red}30`, borderRadius:8, padding:"12px 16px" }}>
+              <div style={{ fontSize:13, fontWeight:600, color: syncResult.ok ? C.green : C.red, marginBottom:4 }}>
+                {syncResult.ok ? "✓ Scrapers updated" : "✕ Sync failed"}
+              </div>
+              <div style={{ fontSize:12, color:C.muted, marginBottom: syncResult.data?.results ? 8 : 0 }}>
+                {syncResult.data?.summary}
+              </div>
+              {syncResult.data?.results && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                  {syncResult.data.results.map((r,i) => (
+                    <span key={i} style={{ fontSize:11, padding:"2px 8px", borderRadius:4,
+                      background: r.status==="updated" ? `${C.green}20` : r.status==="skipped" ? `${C.accent}20` : `${C.red}20`,
+                      color: r.status==="updated" ? C.green : r.status==="skipped" ? C.accent : C.red }}>
+                      {r.name}: {r.status}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {syncResult.data?.titlesUsed && (
+                <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>
+                  Titles: {syncResult.data.titlesUsed.join(", ")}
+                  {syncResult.data.locationsUsed?.length > 0 && ` · Locations: ${syncResult.data.locationsUsed.join(", ")}`}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
-            <Field label="TARGET TITLES" k="titles" />
+            <Field label="TARGET TITLES" k="titles" hint="comma-separated · synced to scrapers" />
             <Field label="KEY RESPONSIBILITIES" k="responsibilities" multiline />
-            <Field label="PREFERRED LOCATIONS" k="locations" />
+            <Field label="PREFERRED LOCATIONS" k="locations" hint="comma-separated · synced to scrapers" />
             <Field label="TARGET COMPENSATION" k="salary" />
             <Field label="TARGET INDUSTRIES" k="industries" />
             <Field label="COMPANY SIZE" k="companySize" />

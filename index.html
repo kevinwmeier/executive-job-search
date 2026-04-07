@@ -35,11 +35,16 @@
     };
 
     // ── localStorage helpers ───────────────────────────────────────────────
+    const BOARDS_VERSION = "2"; // bump when DEFAULT_BOARDS changes to reset cached list
     function load(key, fallback) {
       try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
     }
     function save(key, value) {
       try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
+    // Reset cached boards if version stamp changed
+    if (load("boards_version","") !== BOARDS_VERSION) {
+      try { localStorage.removeItem("boards"); localStorage.setItem("boards_version", JSON.stringify(BOARDS_VERSION)); } catch {}
     }
 
     const C = {
@@ -433,6 +438,19 @@
               API key is stored securely in Vercel environment variables. To update it, go to your Vercel project → Settings → Environment Variables.
             </p>
           </div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginBottom:20 }}>
+            <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>N8N SCRAPER CONTROL</label>
+            <p style={{ fontSize:12, color:C.muted, lineHeight:1.6, marginBottom:8 }}>
+              To enable live scraper toggling from the Job Boards tab, add your n8n API key to Vercel:
+            </p>
+            <div style={{ fontSize:12, color:C.text, marginBottom:4 }}>
+              <span style={{ color:C.accent, fontWeight:600 }}>N8N_API_KEY</span>
+              <span style={{ color:C.muted }}> — Vercel → Settings → Environment Variables</span>
+            </div>
+            <p style={{ fontSize:12, color:C.muted, lineHeight:1.6, marginTop:8 }}>
+              Generate the key in n8n: Settings → n8n API → Create API Key. Then paste each workflow's ID (from the workflow URL) into the Job Boards tab using <span style={{ color:C.accent, fontWeight:600 }}>LINK N8N</span>.
+            </p>
+          </div>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
             <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>ACTIVE WEBHOOKS</label>
             {Object.entries(WEBHOOKS).map(([k,v]) => (
@@ -548,11 +566,26 @@
     }
 
     // ── BOARDS PANEL ───────────────────────────────────────────────────────
+    // workflowId = n8n workflow ID — pre-filled from live n8n instance
+    // status: "active"=running OK, "inactive"=exists but off, "planned"=not yet built
     const DEFAULT_BOARDS = [
-      { id:"b1", name:"Google Alerts — COO roles", url:"RSS feed", active:true, type:"rss" },
-      { id:"b2", name:"Boyden Canada", url:"https://boyden.thriveapp.ly/api/v1/job_listings", active:true, type:"api" },
-      { id:"b3", name:"Spencer Stuart", url:"https://www.spencerstuart.com/who-we-are/careers", active:true, type:"scrape" },
-      { id:"b4", name:"Korn Ferry", url:"https://www.kornferry.com/careers", active:false, type:"scrape" },
+      // ── Active scrapers (scheduled daily @ 7am) ──────────────────────────
+      { id:"b1", name:"Boyden",                url:"https://boyden.thriveapp.ly/api/v1/job_listings",          active:true,  type:"api",    workflowId:"uM7rHp7yPmIavmzH", status:"active"   },
+      { id:"b2", name:"Goldbeck",              url:"https://goldbeck.com/wp-json/wp/v2/my_job_listings",       active:true,  type:"api",    workflowId:"05U90dFzEMUgmZm6", status:"active"   },
+      { id:"b3", name:"Caldwell",              url:"https://caldwell.thriveapp.ly/api/v1/job_listings",         active:true,  type:"api",    workflowId:"AE8M1Jq2VAbyArZZ", status:"active"   },
+      { id:"b4", name:"MacDonald Search Group",url:"https://www.macdonaldsearchgroup.com/job-listings",        active:true,  type:"scrape", workflowId:"UA3lipRMMxnryYbF", status:"active"   },
+      { id:"b5", name:"Leaders International", url:"https://leadersinternational.com/region/british-columbia/",active:true,  type:"scrape", workflowId:"9uwWWvU8AjzoX0b9", status:"active"   },
+      { id:"b6", name:"LMI Technologies",      url:"https://lmitechnologies.applytojob.com/apply/",            active:true,  type:"scrape", workflowId:"NejukFelgDuBB4so", status:"active"   },
+      { id:"b7", name:"PFM Search",            url:"https://pfmsearch.com/executive-opportunities/",           active:true,  type:"scrape", workflowId:"3CuPKUDQ0ZmxqJ9o", status:"active"   },
+      { id:"b8", name:"PFM Scraper",           url:"https://pfmsearch.com",                                    active:true,  type:"scrape", workflowId:"cyQmfpOszbmR5iTe", status:"active"   },
+      // ── Inactive (built but currently off) ──────────────────────────────
+      { id:"b9",  name:"Google Alerts — RSS",      url:"RSS feed (Google Alerts)",  active:false, type:"rss",   workflowId:"iVAaHPUOONOZxNxJ", status:"inactive" },
+      { id:"b10", name:"LinkedIn Alerts (Email)",  url:"Gmail trigger (LinkedIn)",  active:false, type:"email", workflowId:"ThHJZMxOX0Fk7G1D", status:"inactive" },
+      // ── Planned (not yet built in n8n) ───────────────────────────────────
+      { id:"b11", name:"Spencer Stuart",       url:"https://www.spencerstuart.com", active:false, type:"scrape", workflowId:"", status:"planned" },
+      { id:"b12", name:"Heidrick & Struggles", url:"https://www.heidrick.com",      active:false, type:"scrape", workflowId:"", status:"planned" },
+      { id:"b13", name:"Korn Ferry",           url:"https://www.kornferry.com",     active:false, type:"scrape", workflowId:"", status:"planned" },
+      { id:"b14", name:"Russell Reynolds",     url:"https://www.russellreynolds.com",active:false,type:"scrape", workflowId:"", status:"planned" },
     ];
 
     function BoardsPanel({ boards, setBoards, profile }) {
@@ -560,7 +593,43 @@
       const [suggestions, setSuggestions] = useState([]);
       const [newName, setNewName] = useState("");
       const [newUrl, setNewUrl] = useState("");
+      const [toggling, setToggling] = useState({});
+      const [editingWorkflow, setEditingWorkflow] = useState(null);
+      const [workflowInput, setWorkflowInput] = useState("");
+      const [errors, setErrors] = useState({});
       const uid = () => Math.random().toString(36).slice(2,8);
+
+      async function handleToggle(board) {
+        const newActive = !board.active;
+        if (!board.workflowId) {
+          setBoards(bs => bs.map(x => x.id===board.id ? {...x, active:newActive} : x));
+          setErrors(e => ({...e, [board.id]:"No workflow ID linked — saved locally only. Click LINK N8N to connect."}));
+          setTimeout(() => setErrors(e => ({...e, [board.id]:""})), 5000);
+          return;
+        }
+        setToggling(t => ({...t, [board.id]:true}));
+        setErrors(e => ({...e, [board.id]:""}));
+        try {
+          const res = await fetch("/api/toggle-scraper", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body:JSON.stringify({ workflowId:board.workflowId, active:newActive }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Toggle failed");
+          setBoards(bs => bs.map(x => x.id===board.id ? {...x, active:newActive} : x));
+        } catch(e) {
+          setErrors(err => ({...err, [board.id]:e.message}));
+        } finally {
+          setToggling(t => ({...t, [board.id]:false}));
+        }
+      }
+
+      function saveWorkflowId(boardId) {
+        setBoards(bs => bs.map(x => x.id===boardId ? {...x, workflowId:workflowInput.trim()} : x));
+        setEditingWorkflow(null);
+        setWorkflowInput("");
+      }
 
       async function suggest() {
         setSuggesting(true); setSuggestions([]);
@@ -570,35 +639,84 @@
         setSuggesting(false);
       }
 
+      const statusColors = { active:C.green, inactive:C.muted, planned:"#3a3f52" };
+      const statusLabels = { active:"ACTIVE", inactive:"INACTIVE", planned:"PLANNED" };
+
       return (
-        <div style={{ padding:32, maxWidth:760 }} className="fade-up">
+        <div style={{ padding:32, maxWidth:780 }} className="fade-up">
           <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:6 }}>Job Boards</h2>
-          <p style={{ color:C.muted, fontSize:14, marginBottom:16 }}>Track active boards. Add new ones here then create matching nodes in n8n.</p>
+          <p style={{ color:C.muted, fontSize:14, marginBottom:16 }}>
+            Toggle scrapers on/off — changes activate or deactivate the n8n workflow directly.
+            Click <span style={{ color:C.accent, fontWeight:600 }}>LINK N8N</span> on each board to enter its workflow ID (found in the n8n workflow URL).
+          </p>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:20 }}>
-            {boards.map((b,i) => (
-              <div key={b.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 18px",
-                borderBottom:i<boards.length-1?`1px solid ${C.border}`:"none" }}>
-                <div onClick={() => setBoards(bs => bs.map(x => x.id===b.id?{...x,active:!x.active}:x))}
-                  style={{ width:36, height:20, borderRadius:10, background:b.active?C.accent:C.border,
-                    cursor:"pointer", position:"relative", transition:"background .2s", flexShrink:0 }}>
-                  <div style={{ width:14, height:14, borderRadius:7, background:"white", position:"absolute",
-                    top:3, left:b.active?19:3, transition:"left .2s" }} />
+            {boards.map((b,i) => {
+              const isLast = i === boards.length - 1;
+              const showDivider = !isLast || editingWorkflow===b.id || errors[b.id];
+              return (
+                <div key={b.id}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 18px",
+                    borderBottom:showDivider?`1px solid ${C.border}`:"none" }}>
+                    {toggling[b.id]
+                      ? <div style={{ width:36, height:20, display:"flex", alignItems:"center", justifyContent:"center" }}><Spinner size={14}/></div>
+                      : <div onClick={() => handleToggle(b)}
+                          style={{ width:36, height:20, borderRadius:10, background:b.active?C.accent:C.border,
+                            cursor:"pointer", position:"relative", transition:"background .2s", flexShrink:0 }}>
+                          <div style={{ width:14, height:14, borderRadius:7, background:"white", position:"absolute",
+                            top:3, left:b.active?19:3, transition:"left .2s" }} />
+                        </div>
+                    }
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:13, fontWeight:600, color:b.active?C.text:C.muted }}>{b.name}</div>
+                      <div style={{ fontSize:11, color:C.muted, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.url}</div>
+                    </div>
+                    <Tag label={b.type.toUpperCase()} color={b.type==="rss"?C.green:b.type==="api"?C.accent:b.type==="email"?C.blue:C.muted} />
+                    <span style={{ fontSize:10, color:statusColors[b.status||"planned"], fontWeight:600, letterSpacing:.4, flexShrink:0 }}>
+                      {statusLabels[b.status||"planned"]}
+                    </span>
+                    {b.workflowId
+                      ? <button onClick={() => { setEditingWorkflow(editingWorkflow===b.id?null:b.id); setWorkflowInput(b.workflowId); }}
+                          title={`Workflow ID: ${b.workflowId}`}
+                          style={{ fontSize:10, color:C.green, fontWeight:600, letterSpacing:.4, background:"none",
+                            border:`1px solid ${C.green}40`, borderRadius:4, padding:"2px 7px", cursor:"pointer", flexShrink:0 }}>
+                          LINKED
+                        </button>
+                      : <button onClick={() => { setEditingWorkflow(editingWorkflow===b.id?null:b.id); setWorkflowInput(""); }}
+                          style={{ fontSize:10, color:C.accent, fontWeight:600, letterSpacing:.4, background:"none",
+                            border:`1px solid ${C.accent}40`, borderRadius:4, padding:"2px 7px", cursor:"pointer", flexShrink:0 }}>
+                          LINK N8N
+                        </button>
+                    }
+                    <Btn variant="danger" small onClick={() => setBoards(bs => bs.filter(x => x.id!==b.id))}>✕</Btn>
+                  </div>
+                  {editingWorkflow === b.id && (
+                    <div style={{ padding:"10px 18px", background:C.surface, borderBottom:`1px solid ${C.border}`,
+                      display:"flex", gap:8, alignItems:"center" }}>
+                      <div style={{ fontSize:12, color:C.muted, whiteSpace:"nowrap" }}>n8n Workflow ID:</div>
+                      <input value={workflowInput} onChange={e => setWorkflowInput(e.target.value)}
+                        placeholder="e.g. AbCdEf1234567890"
+                        style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:6,
+                          color:C.text, padding:"7px 10px", fontSize:12 }} />
+                      <Btn small onClick={() => saveWorkflowId(b.id)} disabled={!workflowInput.trim()}>Save</Btn>
+                      <Btn variant="ghost" small onClick={() => setEditingWorkflow(null)}>Cancel</Btn>
+                    </div>
+                  )}
+                  {errors[b.id] && (
+                    <div style={{ padding:"6px 18px", fontSize:11, color:C.red, background:`${C.red}10`,
+                      borderBottom:`1px solid ${C.border}` }}>
+                      {errors[b.id]}
+                    </div>
+                  )}
                 </div>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:b.active?C.text:C.muted }}>{b.name}</div>
-                  <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{b.url}</div>
-                </div>
-                <Tag label={b.type.toUpperCase()} color={b.type==="rss"?C.green:b.type==="api"?C.accent:C.blue} />
-                <Btn variant="danger" small onClick={() => setBoards(bs => bs.filter(x => x.id!==b.id))}>✕</Btn>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div style={{ display:"flex", gap:8, marginBottom:24 }}>
             <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Board name"
               style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:"9px 12px", fontSize:13 }} />
             <input value={newUrl} onChange={e=>setNewUrl(e.target.value)} placeholder="URL or RSS feed"
               style={{ flex:2, background:C.card, border:`1px solid ${C.border}`, borderRadius:7, color:C.text, padding:"9px 12px", fontSize:13 }} />
-            <Btn onClick={() => { if(!newName.trim()) return; setBoards(bs=>[...bs,{id:uid(),name:newName,url:newUrl,active:true,type:"scrape"}]); setNewName(""); setNewUrl(""); }}
+            <Btn onClick={() => { if(!newName.trim()) return; setBoards(bs=>[...bs,{id:uid(),name:newName,url:newUrl,active:true,type:"scrape",workflowId:"",status:"planned"}]); setNewName(""); setNewUrl(""); }}
               disabled={!newName.trim()}>+ Add</Btn>
           </div>
           <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:20 }}>
@@ -613,7 +731,7 @@
                 {suggestions.map((s,i) => (
                   <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:7, padding:"8px 14px", display:"flex", alignItems:"center", gap:8 }}>
                     <span style={{ fontSize:13 }}>{s.name}</span>
-                    <Btn variant="success" small onClick={() => setBoards(bs=>[...bs,{id:uid(),name:s.name,url:s.url,active:true,type:s.type||"scrape"}])}>+ Add</Btn>
+                    <Btn variant="success" small onClick={() => setBoards(bs=>[...bs,{id:uid(),name:s.name,url:s.url,active:true,type:s.type||"scrape",workflowId:"",status:"planned"}])}>+ Add</Btn>
                   </div>
                 ))}
               </div>

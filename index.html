@@ -424,6 +424,16 @@
 
     // ── SETTINGS PANEL ────────────────────────────────────────────────────
     function SettingsPanel() {
+      const [n8nStatus, setN8nStatus] = useState(null); // null | "checking" | {ok, message}
+
+      useEffect(() => {
+        setN8nStatus("checking");
+        fetch("/api/test-n8n")
+          .then(r => r.json())
+          .then(d => setN8nStatus(d))
+          .catch(() => setN8nStatus({ ok: false, message: "Could not reach /api/test-n8n" }));
+      }, []);
+
       return (
         <div style={{ padding:32, maxWidth:600 }} className="fade-up">
           <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:26, marginBottom:6 }}>Settings</h2>
@@ -440,16 +450,20 @@
           </div>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginBottom:20 }}>
             <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>N8N SCRAPER CONTROL</label>
-            <p style={{ fontSize:12, color:C.muted, lineHeight:1.6, marginBottom:8 }}>
-              To enable live scraper toggling from the Job Boards tab, add your n8n API key to Vercel:
-            </p>
-            <div style={{ fontSize:12, color:C.text, marginBottom:4 }}>
-              <span style={{ color:C.accent, fontWeight:600 }}>N8N_API_KEY</span>
-              <span style={{ color:C.muted }}> — Vercel → Settings → Environment Variables</span>
+            <div style={{ display:"flex", alignItems:"center", gap:10, fontSize:13, marginBottom:12 }}>
+              {n8nStatus === "checking"
+                ? <><Spinner size={14}/><span style={{ color:C.muted }}>Checking N8N_API_KEY…</span></>
+                : n8nStatus?.ok
+                  ? <><div style={{ width:8, height:8, borderRadius:"50%", background:C.green }}/><span style={{ color:C.text }}>N8N_API_KEY is set — scraper sync enabled</span></>
+                  : <><div style={{ width:8, height:8, borderRadius:"50%", background:C.red }}/><span style={{ color:C.red }}>{n8nStatus?.message || "N8N_API_KEY not set"}</span></>
+              }
             </div>
-            <p style={{ fontSize:12, color:C.muted, lineHeight:1.6, marginTop:8 }}>
-              Generate the key in n8n: Settings → n8n API → Create API Key. Then paste each workflow's ID (from the workflow URL) into the Job Boards tab using <span style={{ color:C.accent, fontWeight:600 }}>LINK N8N</span>.
-            </p>
+            {(!n8nStatus || !n8nStatus.ok) && n8nStatus !== "checking" && (
+              <p style={{ fontSize:12, color:C.muted, lineHeight:1.6 }}>
+                To enable scraper toggling and profile sync, add <span style={{ color:C.accent, fontWeight:600 }}>N8N_API_KEY</span> to
+                Vercel → Settings → Environment Variables. Generate the key in n8n under Settings → n8n API → Create API Key.
+              </p>
+            )}
           </div>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
             <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>ACTIVE WEBHOOKS</label>
@@ -583,7 +597,7 @@
                 {syncResult.ok ? "✓ Scrapers updated" : "✕ Sync failed"}
               </div>
               <div style={{ fontSize:12, color:C.muted, marginBottom: syncResult.data?.results ? 8 : 0 }}>
-                {syncResult.data?.summary}
+                {syncResult.data?.summary || syncResult.data?.error || syncResult.data?.message || ""}
               </div>
               {syncResult.data?.results && (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>

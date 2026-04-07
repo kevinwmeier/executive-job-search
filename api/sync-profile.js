@@ -46,7 +46,8 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.N8N_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "N8N_API_KEY not set in Vercel environment variables" });
+    console.error("[sync-profile] N8N_API_KEY is not set in Vercel environment variables");
+    return res.status(500).json({ error: "N8N_API_KEY is not set in Vercel environment variables. Add it under Vercel → Settings → Environment Variables." });
   }
 
   const { titles, locations } = req.body || {};
@@ -78,7 +79,9 @@ export default async function handler(req, res) {
       });
 
       if (!getRes.ok) {
-        results.push({ id, name, status: "error", message: `Fetch failed: ${getRes.status}` });
+        const errText = await getRes.text().catch(() => "");
+        console.error(`[sync-profile] GET workflow ${id} (${name}) failed: ${getRes.status} ${errText}`);
+        results.push({ id, name, status: "error", message: `Fetch failed: ${getRes.status} ${errText}` });
         continue;
       }
 
@@ -123,6 +126,7 @@ export default async function handler(req, res) {
 
       if (!putRes.ok) {
         const errBody = await putRes.json().catch(() => ({}));
+        console.error(`[sync-profile] PUT workflow ${id} (${name}) failed: ${putRes.status}`, errBody);
         results.push({
           id, name, status: "error",
           message: errBody.message || `PUT failed: ${putRes.status}`,
@@ -140,6 +144,7 @@ export default async function handler(req, res) {
 
       results.push({ id, name, status: "updated" });
     } catch (e) {
+      console.error(`[sync-profile] Unexpected error for workflow ${id} (${name}):`, e.message);
       results.push({ id, name, status: "error", message: e.message });
     }
   }

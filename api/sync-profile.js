@@ -107,7 +107,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // 4. PUT the updated workflow
+      // 4. PUT the updated workflow (versionId required by newer n8n to prevent conflicts)
       const putRes = await n8nFetch(`/workflows/${id}`, {
         method: "PUT",
         body: JSON.stringify({
@@ -116,13 +116,14 @@ export default async function handler(req, res) {
           connections: wf.connections,
           settings: wf.settings,
           staticData: wf.staticData || null,
+          ...(wf.versionId ? { versionId: wf.versionId } : {}),
         }),
       });
 
       if (!putRes.ok) {
         const errBody = await putRes.json().catch(() => ({}));
-        const errMsg = errBody.message || `PUT failed (${putRes.status})`;
-        console.error(`[sync-profile] PUT ${name} failed: ${putRes.status}`, errBody);
+        const errMsg = errBody.message || JSON.stringify(errBody) || `PUT failed (${putRes.status})`;
+        console.error(`[sync-profile] PUT ${name} failed: ${putRes.status} — ${errMsg}`);
         // Try to reactivate even if PUT failed
         if (wf.active) {
           await n8nFetch(`/workflows/${id}/activate`, { method: "POST" }).catch(() => {});

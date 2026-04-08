@@ -1,6 +1,5 @@
 const N8N_BASE = "https://n8n-production-97a9.up.railway.app";
 
-// All scraper workflow IDs — skip API workflows and non-JS scrapers
 const SCRAPER_IDS = [
   { id: "uM7rHp7yPmIavmzH", name: "Boyden 2" },
   { id: "05U90dFzEMUgmZm6", name: "Goldbeck Scraper" },
@@ -12,29 +11,31 @@ const SCRAPER_IDS = [
   { id: "cyQmfpOszbmR5iTe", name: "PFM Scraper" },
 ];
 
-/**
- * Replaces the targetTitles array and whichever location array variable
- * the workflow uses (targetLocations / canadianTerms / canadianLocations).
- * Preserves the original variable name so the rest of the code doesn't break.
- */
 function injectProfile(jsCode, titlesArray, locationsArray) {
   let code = jsCode;
-
-  // Replace targetTitles array
   code = code.replace(
     /const targetTitles\s*=\s*\[[\s\S]*?\];/,
     `const targetTitles = ${JSON.stringify(titlesArray)};`
   );
-
-  // Replace location array — preserve whichever variable name the workflow uses
   if (locationsArray.length > 0) {
     code = code.replace(
       /const (targetLocations|canadianTerms|canadianLocations)\s*=\s*\[[\s\S]*?\];/,
       (_, varName) => `const ${varName} = ${JSON.stringify(locationsArray)};`
     );
   }
-
   return code;
+}
+
+async function n8nFetch(path, options = {}) {
+  const apiKey = process.env.N8N_API_KEY;
+  return fetch(`${N8N_BASE}/api/v1${path}`, {
+    ...options,
+    headers: {
+      "X-N8N-API-KEY": apiKey,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
 }
 
 export default async function handler(req, res) {
@@ -46,54 +47,38 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.N8N_API_KEY;
   if (!apiKey) {
-    console.error("[sync-profile] N8N_API_KEY is not set in Vercel environment variables");
-    return res.status(500).json({ error: "N8N_API_KEY is not set in Vercel environment variables. Add it under Vercel → Settings → Environment Variables." });
+    console.error("[sync-profile] N8N_API_KEY is not set");
+    return res.status(500).json({ error: "N8N_API_KEY is not set in Vercel environment variables." });
   }
 
   const { titles, locations } = req.body || {};
-  if (!titles || !titles.trim()) {
-    return res.status(400).json({ error: "titles is required" });
-  }
+  if (!titles?.trim()) return res.status(400).json({ error: "titles is required" });
 
-  // Parse "Chief Operating Officer, COO, VP Operations" → ["chief operating officer", "coo", "vp operations"]
-  const titlesArray = titles
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0);
-
-  // Parse "BC, Vancouver, Remote" → ["bc", "vancouver", "remote"]
-  // Strips parenthetical notes like "(remote/hybrid considered)"
+  const titlesArray = titles.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   const locationsArray = (locations || "")
     .replace(/\([^)]*\)/g, "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0);
+    .filter(Boolean);
 
   const results = [];
 
   for (const { id, name } of SCRAPER_IDS) {
     try {
-      // 1. Fetch the current workflow definition
-      const getRes = await fetch(`${N8N_BASE}/api/v1/workflows/${id}`, {
-        headers: { "X-N8N-API-KEY": apiKey, "Content-Type": "application/json" },
-      });
-
+      // 1. Fetch current workflow
+      const getRes = await n8nFetch(`/workflows/${id}`);
       if (!getRes.ok) {
         const errText = await getRes.text().catch(() => "");
-        console.error(`[sync-profile] GET workflow ${id} (${name}) failed: ${getRes.status} ${errText}`);
-        results.push({ id, name, status: "error", message: `Fetch failed: ${getRes.status} ${errText}` });
+        console.error(`[sync-profile] GET ${name} failed: ${getRes.status} ${errText}`);
+        results.push({ id, name, status: "error", message: `Could not fetch workflow (${getRes.status})` });
         continue;
       }
-
       const wf = await getRes.json();
 
-      // 2. Find code nodes that contain targetTitles and inject the profile
+      // 2. Find and update code nodes containing targetTitles
       let modified = false;
       const updatedNodes = (wf.nodes || []).map((node) => {
-        if (
-          node.type === "n8n-nodes-base.code" &&
-          node.parameters?.jsCode?.includes("targetTitles")
-        ) {
+        if (node.type === "n8n-nodes-base.code" && node.parameters?.jsCode?.includes("targetTitles")) {
           modified = true;
           return {
             ...node,
@@ -107,14 +92,24 @@ export default async function handler(req, res) {
       });
 
       if (!modified) {
-        results.push({ id, name, status: "skipped", message: "No targetTitles found in code nodes" });
+        results.push({ id, name, status: "skipped", message: "No targetTitles found" });
         continue;
       }
 
-      // 3. PUT the updated workflow back to n8n
-      const putRes = await fetch(`${N8N_BASE}/api/v1/workflows/${id}`, {
+      // 3. Deactivate first — n8n rejects PUT on active workflows
+      if (wf.active) {
+        const deactivateRes = await n8nFetch(`/workflows/${id}/deactivate`, { method: "POST" });
+        if (!deactivateRes.ok) {
+          const errText = await deactivateRes.text().catch(() => "");
+          console.error(`[sync-profile] Deactivate ${name} failed: ${deactivateRes.status} ${errText}`);
+          results.push({ id, name, status: "error", message: `Could not deactivate before update (${deactivateRes.status})` });
+          continue;
+        }
+      }
+
+      // 4. PUT the updated workflow
+      const putRes = await n8nFetch(`/workflows/${id}`, {
         method: "PUT",
-        headers: { "X-N8N-API-KEY": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({
           name: wf.name,
           nodes: updatedNodes,
@@ -126,25 +121,30 @@ export default async function handler(req, res) {
 
       if (!putRes.ok) {
         const errBody = await putRes.json().catch(() => ({}));
-        console.error(`[sync-profile] PUT workflow ${id} (${name}) failed: ${putRes.status}`, errBody);
-        results.push({
-          id, name, status: "error",
-          message: errBody.message || `PUT failed: ${putRes.status}`,
-        });
+        const errMsg = errBody.message || `PUT failed (${putRes.status})`;
+        console.error(`[sync-profile] PUT ${name} failed: ${putRes.status}`, errBody);
+        // Try to reactivate even if PUT failed
+        if (wf.active) {
+          await n8nFetch(`/workflows/${id}/activate`, { method: "POST" }).catch(() => {});
+        }
+        results.push({ id, name, status: "error", message: errMsg });
         continue;
       }
 
-      // 4. Re-activate if the workflow was active (PUT can deactivate it in some n8n versions)
+      // 5. Reactivate
       if (wf.active) {
-        await fetch(`${N8N_BASE}/api/v1/workflows/${id}/activate`, {
-          method: "POST",
-          headers: { "X-N8N-API-KEY": apiKey },
-        }).catch(() => {}); // non-fatal if this fails
+        const activateRes = await n8nFetch(`/workflows/${id}/activate`, { method: "POST" });
+        if (!activateRes.ok) {
+          console.error(`[sync-profile] Reactivate ${name} failed after successful update`);
+          // Still count as updated — the code change went through, just needs manual reactivation
+          results.push({ id, name, status: "updated", message: "Updated but could not reactivate — check n8n" });
+          continue;
+        }
       }
 
       results.push({ id, name, status: "updated" });
     } catch (e) {
-      console.error(`[sync-profile] Unexpected error for workflow ${id} (${name}):`, e.message);
+      console.error(`[sync-profile] Unexpected error for ${name}:`, e.message);
       results.push({ id, name, status: "error", message: e.message });
     }
   }

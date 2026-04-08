@@ -107,14 +107,23 @@ export default async function handler(req, res) {
         }
       }
 
-      // 4. PUT the updated workflow — only send the fields n8n's schema allows
+      // 4. PUT the updated workflow — only send the fields n8n's schema allows.
+      // Strip settings to known-safe keys (availableInMCP etc. cause schema errors).
+      const safeSettings = {};
+      const SAFE_SETTING_KEYS = ["executionOrder","saveManualExecutions","callerPolicy",
+        "errorWorkflow","timezone","saveExecutionProgress",
+        "saveDataErrorExecution","saveDataSuccessExecution"];
+      for (const k of SAFE_SETTING_KEYS) {
+        if (wf.settings?.[k] !== undefined) safeSettings[k] = wf.settings[k];
+      }
+
       const putRes = await n8nFetch(`/workflows/${id}`, {
         method: "PUT",
         body: JSON.stringify({
           name: wf.name,
           nodes: updatedNodes,
           connections: wf.connections,
-          settings: wf.settings,
+          settings: safeSettings,
         }),
       });
 

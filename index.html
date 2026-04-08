@@ -601,10 +601,10 @@
               {syncResult.data?.results && (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                   {syncResult.data.results.map((r,i) => (
-                    <span key={i} style={{ fontSize:11, padding:"2px 8px", borderRadius:4,
+                    <span key={i} title={r.message || ""} style={{ fontSize:11, padding:"2px 8px", borderRadius:4,
                       background: r.status==="updated" ? `${C.green}20` : r.status==="skipped" ? `${C.accent}20` : `${C.red}20`,
                       color: r.status==="updated" ? C.green : r.status==="skipped" ? C.accent : C.red }}>
-                      {r.name}: {r.status}
+                      {r.name}: {r.status}{r.message ? ` — ${r.message}` : ""}
                     </span>
                   ))}
                 </div>

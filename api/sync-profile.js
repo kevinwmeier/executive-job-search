@@ -121,8 +121,9 @@ export default async function handler(req, res) {
       });
 
       if (!putRes.ok) {
-        const errBody = await putRes.json().catch(() => ({}));
-        const errMsg = errBody.message || JSON.stringify(errBody) || `PUT failed (${putRes.status})`;
+        const rawText = await putRes.text().catch(() => "");
+        let errMsg = `PUT failed (${putRes.status})`;
+        try { const b = JSON.parse(rawText); errMsg = b.message || b.error || JSON.stringify(b); } catch { errMsg = rawText || errMsg; }
         console.error(`[sync-profile] PUT ${name} failed: ${putRes.status} — ${errMsg}`);
         // Try to reactivate even if PUT failed
         if (wf.active) {

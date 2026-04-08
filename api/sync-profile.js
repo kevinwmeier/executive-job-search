@@ -107,7 +107,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // 4. PUT the updated workflow (versionId required by newer n8n to prevent conflicts)
+      // 4. PUT the updated workflow — only send the fields n8n's schema allows
       const putRes = await n8nFetch(`/workflows/${id}`, {
         method: "PUT",
         body: JSON.stringify({
@@ -115,8 +115,6 @@ export default async function handler(req, res) {
           nodes: updatedNodes,
           connections: wf.connections,
           settings: wf.settings,
-          staticData: wf.staticData || null,
-          ...(wf.versionId ? { versionId: wf.versionId } : {}),
         }),
       });
 

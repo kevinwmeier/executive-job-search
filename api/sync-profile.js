@@ -9,6 +9,7 @@ const SCRAPER_IDS = [
   { id: "NejukFelgDuBB4so", name: "LMI Scraper" },
   { id: "3CuPKUDQ0ZmxqJ9o", name: "PFM Search Scraper" },
   { id: "cyQmfpOszbmR5iTe", name: "PFM Scraper" },
+  { id: "1nCsCgtVpPBtdPbd", name: "Nelson & Kraft Scraper" },
 ];
 
 function injectProfile(jsCode, titlesArray, locationsArray) {

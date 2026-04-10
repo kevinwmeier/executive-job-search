@@ -35,7 +35,7 @@
     };
 
     // ── localStorage helpers ───────────────────────────────────────────────
-    const BOARDS_VERSION = "2"; // bump when DEFAULT_BOARDS changes to reset cached list
+    const BOARDS_VERSION = "3"; // bump when DEFAULT_BOARDS changes to reset cached list
     function load(key, fallback) {
       try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
     }
@@ -660,6 +660,7 @@
     // status: "active"=running OK, "inactive"=exists but off, "planned"=not yet built
     const DEFAULT_BOARDS = [
       // ── Active scrapers (scheduled daily @ 7am) ──────────────────────────
+      { id:"b0", name:"Nelson & Kraft",         url:"https://nelsonandkraft.com/jobs/",                         active:true,  type:"scrape", workflowId:"1nCsCgtVpPBtdPbd", status:"active"   },
       { id:"b1", name:"Boyden",                url:"https://boyden.thriveapp.ly/api/v1/job_listings",          active:true,  type:"api",    workflowId:"uM7rHp7yPmIavmzH", status:"active"   },
       { id:"b2", name:"Goldbeck",              url:"https://goldbeck.com/wp-json/wp/v2/my_job_listings",       active:true,  type:"api",    workflowId:"05U90dFzEMUgmZm6", status:"active"   },
       { id:"b3", name:"Caldwell",              url:"https://caldwell.thriveapp.ly/api/v1/job_listings",         active:true,  type:"api",    workflowId:"AE8M1Jq2VAbyArZZ", status:"active"   },

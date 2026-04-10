@@ -318,7 +318,10 @@
                       {[role.Company, role.Location, role.Salary, role.Source].filter(Boolean).join(" · ")}
                     </div>
                   </div>
-                  <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                    {role.FetchedDate && (
+                      <span style={{ fontSize:11, color:C.muted, whiteSpace:"nowrap" }}>{role.FetchedDate}</span>
+                    )}
                     {role.Status === "New" && (
                       <>
                         <Btn variant="success" small onClick={e => { e.stopPropagation(); handleTag(role); }} disabled={actionLoading===role.id}>

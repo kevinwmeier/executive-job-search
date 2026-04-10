@@ -256,7 +256,7 @@
         if (r.Status === "Deleted") return false;
         if (filter === "all") return true;
         return r.Status === filter;
-      });
+      }).sort((a, b) => new Date(b.FetchedDate || 0) - new Date(a.FetchedDate || 0));
 
       const statusColor = { New:C.blue, Tagged:C.green, Applied:C.accent };
       const counts = { New:0, Tagged:0, Applied:0, all:0 };

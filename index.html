@@ -493,6 +493,13 @@
     // ── SETTINGS PANEL ────────────────────────────────────────────────────
     function SettingsPanel() {
       const [n8nStatus, setN8nStatus] = useState(null); // null | "checking" | {ok, message}
+      const [alertEmail, setAlertEmail] = useState(() => load("alertEmail", ""));
+      const [alertEnabled, setAlertEnabled] = useState(() => load("alertEnabled", false));
+      const [alertSetupStatus, setAlertSetupStatus] = useState(null);
+      const [testStatus, setTestStatus] = useState(null);
+      const [showInstructions, setShowInstructions] = useState(false);
+      const [setupLoading, setSetupLoading] = useState(false);
+      const [testLoading, setTestLoading] = useState(false);
 
       useEffect(() => {
         setN8nStatus("checking");
@@ -501,6 +508,54 @@
           .then(d => setN8nStatus(d))
           .catch(() => setN8nStatus({ ok: false, message: "Could not reach /api/test-n8n" }));
       }, []);
+
+      useEffect(() => { save("alertEmail", alertEmail); }, [alertEmail]);
+      useEffect(() => { save("alertEnabled", alertEnabled); }, [alertEnabled]);
+
+      async function setupAlertWorkflow(enabled) {
+        setSetupLoading(true); setAlertSetupStatus(null);
+        try {
+          const res = await fetch("/api/create-alert-workflow", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alertEmail, enabled }),
+          });
+          const data = await res.json();
+          if (!res.ok || data.error) throw new Error(data.error || "Setup failed");
+          setAlertEnabled(enabled);
+          setAlertSetupStatus({ ok: true, message: data.created ? "Workflow created & " + (enabled ? "enabled" : "disabled") : "Workflow updated — " + (enabled ? "enabled" : "disabled") });
+        } catch(e) {
+          setAlertSetupStatus({ ok: false, message: e.message });
+        }
+        setSetupLoading(false);
+        setTimeout(() => setAlertSetupStatus(null), 8000);
+      }
+
+      async function sendTestEmail() {
+        setTestLoading(true); setTestStatus(null);
+        try {
+          const res = await fetch("/api/send-alert", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: alertEmail,
+              roles: [{
+                Title: "Chief Operating Officer", Company: "Acme Corp",
+                Location: "Vancouver, BC", Salary: "$350,000", Source: "Test",
+                Summary: "This is a test alert from your Executive Job Search Agent. If you received this, email alerts are working correctly.",
+                URL: "https://executive-job-search.vercel.app", FetchedDate: new Date().toISOString().split('T')[0], Status: "New",
+              }],
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || data.error) throw new Error(data.error || "Send failed");
+          setTestStatus({ ok: true, message: `Test email sent to ${alertEmail}` });
+        } catch(e) {
+          setTestStatus({ ok: false, message: e.message });
+        }
+        setTestLoading(false);
+        setTimeout(() => setTestStatus(null), 8000);
+      }
 
       const mobile = useMobile();
 
@@ -534,6 +589,78 @@
               </p>
             )}
           </div>
+          {/* ── EMAIL ALERTS ─────────────────────────── */}
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginBottom:20 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+              <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6 }}>EMAIL ALERTS</label>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:12, color:alertEnabled?C.green:C.muted }}>{alertEnabled?"On":"Off"}</span>
+                <div onClick={() => setupAlertWorkflow(!alertEnabled)}
+                  style={{ width:36, height:20, borderRadius:10, background:alertEnabled?C.accent:C.border,
+                    cursor:setupLoading?"not-allowed":"pointer", position:"relative", transition:"background .2s", opacity:setupLoading?.6:1 }}>
+                  <div style={{ width:14, height:14, borderRadius:7, background:"white", position:"absolute",
+                    top:3, left:alertEnabled?19:3, transition:"left .2s" }} />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize:13, color:C.text, lineHeight:1.65, marginBottom:14 }}>
+              Sends you an email every morning when new roles matching your profile were scraped overnight.
+            </div>
+
+            <div style={{ marginBottom:12 }}>
+              <label style={{ fontSize:11, color:C.muted, fontWeight:600, letterSpacing:.5, display:"block", marginBottom:6 }}>ALERT EMAIL ADDRESS</label>
+              <input value={alertEmail} onChange={e => setAlertEmail(e.target.value)}
+                placeholder="you@gmail.com"
+                style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:7,
+                  color:C.text, padding:"9px 12px", fontSize:13 }} />
+            </div>
+
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom: (alertSetupStatus || testStatus) ? 12 : 0 }}>
+              <Btn onClick={() => setupAlertWorkflow(true)} disabled={setupLoading || !alertEmail.trim()}>
+                {setupLoading ? <><Spinner size={13}/> Setting up…</> : "⇅ Save & Enable"}
+              </Btn>
+              <Btn variant="ghost" onClick={sendTestEmail} disabled={testLoading || !alertEmail.trim()}>
+                {testLoading ? <><Spinner size={13}/> Sending…</> : "✉ Send Test Email"}
+              </Btn>
+              <button onClick={() => setShowInstructions(v => !v)}
+                style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:12, padding:"6px 4px" }}>
+                {showInstructions ? "▲ Hide setup steps" : "▼ Setup instructions"}
+              </button>
+            </div>
+
+            {alertSetupStatus && (
+              <Notice type={alertSetupStatus.ok?"success":"error"}>{alertSetupStatus.message}</Notice>
+            )}
+            {testStatus && (
+              <Notice type={testStatus.ok?"success":"error"}>{testStatus.message}</Notice>
+            )}
+
+            {showInstructions && (
+              <div style={{ background:C.surface, borderRadius:8, padding:16, fontSize:12, color:C.muted, lineHeight:1.8, marginTop:8 }}>
+                <div style={{ color:C.accent, fontWeight:600, marginBottom:10, fontSize:11, letterSpacing:.5 }}>ONE-TIME SETUP — 3 STEPS</div>
+                <div style={{ marginBottom:8 }}>
+                  <span style={{ color:C.text, fontWeight:600 }}>1. Get a Gmail App Password</span><br/>
+                  Go to <span style={{ color:C.blue }}>myaccount.google.com → Security → 2-Step Verification → App Passwords</span>.
+                  Create one named "Job Search Agent". Copy the 16-character password.
+                </div>
+                <div style={{ marginBottom:8 }}>
+                  <span style={{ color:C.text, fontWeight:600 }}>2. Add to Vercel Environment Variables</span><br/>
+                  In your Vercel project → Settings → Environment Variables, add:<br/>
+                  <span style={{ color:C.accent }}>GMAIL_USER</span> → your Gmail address<br/>
+                  <span style={{ color:C.accent }}>GMAIL_APP_PASSWORD</span> → the 16-char app password<br/>
+                  <span style={{ color:C.accent }}>ALERT_EMAIL</span> → where to receive alerts (can be same as GMAIL_USER)<br/>
+                  Then redeploy (Vercel → Deployments → Redeploy).
+                </div>
+                <div>
+                  <span style={{ color:C.text, fontWeight:600 }}>3. Enable here</span><br/>
+                  Enter your email above, click <span style={{ color:C.accent }}>Save & Enable</span>, then test with <span style={{ color:C.accent }}>Send Test Email</span>.
+                  Alerts run daily at 8:10am UTC (adjustable in n8n).
+                </div>
+              </div>
+            )}
+          </div>
+
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:24 }}>
             <label style={{ fontSize:11, color:C.accent, fontWeight:600, letterSpacing:.6, display:"block", marginBottom:12 }}>ACTIVE WEBHOOKS</label>
             {Object.entries(WEBHOOKS).map(([k,v]) => (

@@ -18,33 +18,54 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "n8n executions fetch failed", status: execRes.status, body: execData });
     }
 
-    // For each execution, get the error detail
+    // For each unique workflow, get one execution detail
     const executions = execData.data || [];
+    const seen = new Set();
+    const unique = executions.filter(ex => {
+      const key = ex.workflowId || ex.workflowData?.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     const details = await Promise.all(
-      executions.slice(0, 8).map(async (ex) => {
+      unique.slice(0, 10).map(async (ex) => {
         try {
-          const detailRes = await fetch(`${N8N_BASE}/api/v1/executions/${ex.id}`, { headers: h });
+          const detailRes = await fetch(`${N8N_BASE}/api/v1/executions/${ex.id}?includeData=true`, { headers: h });
           const detail = await detailRes.json();
 
-          // Find the first node with an error
-          const data = detail.data?.resultData?.runData || {};
-          const errorNode = Object.entries(data).find(([, v]) =>
-            Array.isArray(v) && v.some(run => run.error)
-          );
-          const errorInfo = errorNode
-            ? {
-                node: errorNode[0],
-                error: errorNode[1].find(r => r.error)?.error,
+          const runData = detail.data?.resultData?.runData || detail.data?.data?.resultData?.runData || {};
+
+          // Find nodes with errors
+          let errorNode = null, errorMessage = "unknown", errorType = "";
+          for (const [nodeName, runs] of Object.entries(runData)) {
+            if (!Array.isArray(runs)) continue;
+            for (const run of runs) {
+              if (run.error) {
+                errorNode = nodeName;
+                errorMessage = run.error.message || run.error.description || run.error.name || JSON.stringify(run.error).slice(0, 200);
+                errorType = run.error.name || run.error.type || "";
+                break;
               }
-            : null;
+            }
+            if (errorNode) break;
+          }
+
+          // Also check top-level error
+          const topErr = detail.data?.resultData?.error || detail.data?.data?.resultData?.error;
+          if (!errorNode && topErr) {
+            errorMessage = topErr.message || JSON.stringify(topErr).slice(0, 200);
+          }
 
           return {
             id: ex.id,
-            workflowName: ex.workflowData?.name || ex.workflowId,
+            workflowId: ex.workflowId || detail.workflowId,
+            workflowName: detail.workflowData?.name || ex.workflowData?.name || ex.workflowId,
             startedAt: ex.startedAt,
-            errorNode: errorInfo?.node,
-            errorMessage: errorInfo?.error?.message || errorInfo?.error?.description || "unknown",
-            errorType: errorInfo?.error?.name,
+            errorNode,
+            errorMessage,
+            errorType,
+            rawDataKeys: Object.keys(runData),
           };
         } catch (e) {
           return { id: ex.id, fetchError: e.message };

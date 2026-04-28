@@ -16,13 +16,15 @@ export default async function handler(req, res) {
   const h = { "X-N8N-API-KEY": apiKey, "Content-Type": "application/json" };
 
   try {
-    // Also check a key workflow (Boyden) for its node/credential structure
+    // Check Boyden workflow in detail — find the DeDupe node code
     const boydenRes = await fetch(`${N8N_BASE}/api/v1/workflows/uM7rHp7yPmIavmzH`, { headers: h });
     const boyden = await boydenRes.json();
     const boydenCredentials = (boyden.nodes || [])
       .flatMap(n => Object.values(n.credentials || {}))
       .map(c => ({ id: c.id, name: c.name }));
     const boydenNodeTypes = (boyden.nodes || []).map(n => ({ name: n.name, type: n.type }));
+    const dedupeNode = (boyden.nodes || []).find(n => n.name.toLowerCase().includes('dedupe'));
+    const dedupeCode = dedupeNode?.parameters?.jsCode || dedupeNode?.parameters?.functionCode || null;
 
     // Get recent executions (last 20)
     const execRes = await fetch(`${N8N_BASE}/api/v1/executions?limit=20&status=error`, { headers: h });
@@ -122,6 +124,7 @@ export default async function handler(req, res) {
       webhookTest,
       boydenCredentials,
       boydenNodeTypes,
+      dedupeCode,
       count: executions.length,
       rawSample,
       details,

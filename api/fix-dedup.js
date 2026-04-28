@@ -100,8 +100,15 @@ export default async function handler(req, res) {
       const dedupeNode = (wf.nodes || []).find(isDedupeNode);
 
       if (!dedupeNode) {
+        // Show all nodes to help debug
         result.status = "no_dedupe_node_found";
-        result.nodeNames = (wf.nodes || []).filter(n => n.type === "n8n-nodes-base.code").map(n => n.name);
+        result.allNodes = (wf.nodes || []).map(n => ({ name: n.name, type: n.type.split('.').pop() }));
+        result.codeNodeCodes = (wf.nodes || [])
+          .filter(n => n.type === "n8n-nodes-base.code")
+          .map(n => ({
+            name: n.name,
+            codeSnippet: (n.parameters?.jsCode || n.parameters?.functionCode || "").slice(0, 300),
+          }));
         results.push(result);
         continue;
       }

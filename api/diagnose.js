@@ -18,6 +18,36 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "n8n executions fetch failed", status: execRes.status, body: execData });
     }
 
+    // RAW: dump first execution's detail structure for debugging
+    const firstId = (execData.data || [])[0]?.id;
+    let rawSample = null;
+    if (firstId) {
+      const r = await fetch(`${N8N_BASE}/api/v1/executions/${firstId}`, { headers: h });
+      const raw = await r.json();
+      // Show top-level keys and a slice of the data
+      rawSample = {
+        topKeys: Object.keys(raw),
+        id: raw.id,
+        workflowId: raw.workflowId,
+        workflowName: raw.workflowData?.name,
+        status: raw.status,
+        stoppedAt: raw.stoppedAt,
+        dataKeys: raw.data ? Object.keys(raw.data) : [],
+        resultDataKeys: raw.data?.resultData ? Object.keys(raw.data.resultData) : [],
+        runDataKeys: raw.data?.resultData?.runData ? Object.keys(raw.data.resultData.runData) : [],
+        errorSample: JSON.stringify(raw.data?.resultData?.error || raw.data?.data?.resultData?.error || "none").slice(0, 500),
+        // Try to get last node error
+        lastNodeError: (() => {
+          const rd = raw.data?.resultData?.runData || {};
+          for (const [node, runs] of Object.entries(rd)) {
+            if (Array.isArray(runs)) for (const run of runs) if (run.error) return { node, err: JSON.stringify(run.error).slice(0,400) };
+          }
+          return null;
+        })(),
+        rawSnippet: JSON.stringify(raw).slice(0, 1000),
+      };
+    }
+
     // For each unique workflow, get one execution detail
     const executions = execData.data || [];
     const seen = new Set();
@@ -73,7 +103,7 @@ export default async function handler(req, res) {
       })
     );
 
-    return res.status(200).json({ ok: true, count: executions.length, details });
+    return res.status(200).json({ ok: true, count: executions.length, rawSample, details });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

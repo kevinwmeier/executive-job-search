@@ -1,8 +1,14 @@
 const N8N_BASE = "https://n8n-production-97a9.up.railway.app";
+const AIRTABLE_BASE = "appExecJobSearch"; // placeholder — override via ?base=xxx
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
+
+  // Quick test: can we hit the get-roles webhook directly?
+  const webhookTest = await fetch(`${N8N_BASE}/webhook/get-roles`, { signal: AbortSignal.timeout(8000) })
+    .then(async r => ({ status: r.status, ok: r.ok, body: (await r.text()).slice(0, 300) }))
+    .catch(e => ({ error: e.message }));
 
   const apiKey = process.env.N8N_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "N8N_API_KEY not set" });
@@ -10,6 +16,14 @@ export default async function handler(req, res) {
   const h = { "X-N8N-API-KEY": apiKey, "Content-Type": "application/json" };
 
   try {
+    // Also check a key workflow (Boyden) for its node/credential structure
+    const boydenRes = await fetch(`${N8N_BASE}/api/v1/workflows/uM7rHp7yPmIavmzH`, { headers: h });
+    const boyden = await boydenRes.json();
+    const boydenCredentials = (boyden.nodes || [])
+      .flatMap(n => Object.values(n.credentials || {}))
+      .map(c => ({ id: c.id, name: c.name }));
+    const boydenNodeTypes = (boyden.nodes || []).map(n => ({ name: n.name, type: n.type }));
+
     // Get recent executions (last 20)
     const execRes = await fetch(`${N8N_BASE}/api/v1/executions?limit=20&status=error`, { headers: h });
     const execData = await execRes.json();
@@ -22,7 +36,7 @@ export default async function handler(req, res) {
     const firstId = (execData.data || [])[0]?.id;
     let rawSample = null;
     if (firstId) {
-      const r = await fetch(`${N8N_BASE}/api/v1/executions/${firstId}`, { headers: h });
+      const r = await fetch(`${N8N_BASE}/api/v1/executions/${firstId}?includeData=true`, { headers: h });
       const raw = await r.json();
       // Show top-level keys and a slice of the data
       rawSample = {
@@ -61,7 +75,7 @@ export default async function handler(req, res) {
     const details = await Promise.all(
       unique.slice(0, 10).map(async (ex) => {
         try {
-          const detailRes = await fetch(`${N8N_BASE}/api/v1/executions/${ex.id}?includeData=true`, { headers: h });
+          const detailRes = await fetch(`${N8N_BASE}/api/v1/executions/${ex.id}?includeData=true&includeData=true`, { headers: h });
           const detail = await detailRes.json();
 
           const runData = detail.data?.resultData?.runData || detail.data?.data?.resultData?.runData || {};
@@ -103,7 +117,15 @@ export default async function handler(req, res) {
       })
     );
 
-    return res.status(200).json({ ok: true, count: executions.length, rawSample, details });
+    return res.status(200).json({
+      ok: true,
+      webhookTest,
+      boydenCredentials,
+      boydenNodeTypes,
+      count: executions.length,
+      rawSample,
+      details,
+    });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

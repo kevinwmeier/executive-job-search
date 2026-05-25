@@ -69,7 +69,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const records = Array.isArray(data) ? data : [data];
-      return records.map(r => ({
+      return records.filter(r => r.Title && r.Title.trim()).map(r => ({
         id: r.id,
         Title: r.Title || "",
         Company: r.Company || "",
@@ -120,6 +120,14 @@
       const data = await res.json();
       if (data.error) throw new Error(`API error: ${data.error.message || JSON.stringify(data.error)}`);
       return data.content?.map(b => b.text || "").join("") || "";
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+    function formatDate(d) {
+      if (!d) return '';
+      const dt = new Date(d);
+      if (isNaN(dt)) return d;
+      return dt.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
     }
 
     // ── UI helpers ─────────────────────────────────────────────────────────
@@ -383,7 +391,7 @@
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:10, flexWrap:"wrap" }}
                     onClick={e => e.stopPropagation()}>
                     {role.FetchedDate && (
-                      <span style={{ fontSize:11, color:C.muted, whiteSpace:"nowrap", marginRight:"auto" }}>{role.FetchedDate}</span>
+                      <span style={{ fontSize:11, color:C.muted, whiteSpace:"nowrap", marginRight:"auto" }}>{formatDate(role.FetchedDate)}</span>
                     )}
                     {role.Status === "New" && (
                       <>
@@ -417,7 +425,7 @@
                         {role.HiringLinkedIn && <> · <a href={role.HiringLinkedIn} target="_blank" rel="noreferrer" style={{ color:C.blue }}>LinkedIn</a></>}
                       </div>
                     )}
-                    <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Fetched: {role.FetchedDate} · Source: {role.Source}</div>
+                    <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Fetched: {formatDate(role.FetchedDate)} · Source: {role.Source}</div>
                   </div>
                 )}
               </div>

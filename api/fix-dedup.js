@@ -52,8 +52,7 @@ do {
 const results = [];
 for (const item of $input.all()) {
   const url = item.json.url;
-  const title = item.json.title || item.json.Title || item.json.name || item.json.jobTitle || "";
-  if (!url || !title.trim()) continue;
+  if (!url) continue;
   if (!existingUrls.has(url)) results.push(item);
 }
 return results;`;

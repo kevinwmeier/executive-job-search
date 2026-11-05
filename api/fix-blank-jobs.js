@@ -99,6 +99,9 @@ export default async function handler(req, res) {
   if (!process.env.N8N_API_KEY) return res.status(500).json({ error: "N8N_API_KEY not set" });
 
   const dryRun = req.method === "GET" || req.query?.dry === "true";
+  if (!dryRun && process.env.ENABLE_FIX_ENDPOINTS !== "true") {
+    return res.status(403).json({ error: "Applying changes is disabled. Set ENABLE_FIX_ENDPOINTS=true to allow it." });
+  }
   const results = [];
 
   for (const scraper of SCRAPER_IDS) {

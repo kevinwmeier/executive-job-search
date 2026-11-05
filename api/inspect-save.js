@@ -17,6 +17,7 @@ const redact = (s) => s.replace(/script\.google\.com\/macros\/s\/[^/"'\s]+/g, "s
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
+  if (process.env.ENABLE_FIX_ENDPOINTS !== "true") return res.status(404).json({ error: "Not found" });
   if (!process.env.N8N_API_KEY) return res.status(500).json({ error: "N8N_API_KEY not set" });
 
   const only = req.query?.id;

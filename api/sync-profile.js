@@ -7,7 +7,6 @@ const SCRAPER_IDS = [
   { id: "UA3lipRMMxnryYbF", name: "MacDonald Scraper" },
   { id: "9uwWWvU8AjzoX0b9", name: "Leaders Int. Scraper" },
   { id: "NejukFelgDuBB4so", name: "LMI Scraper" },
-  { id: "3CuPKUDQ0ZmxqJ9o", name: "PFM Search Scraper" },
   { id: "cyQmfpOszbmR5iTe", name: "PFM Scraper" },
   { id: "1nCsCgtVpPBtdPbd", name: "Nelson & Kraft Scraper" },
 ];

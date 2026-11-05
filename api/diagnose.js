@@ -1,5 +1,4 @@
 const N8N_BASE = "https://n8n-production-97a9.up.railway.app";
-const AIRTABLE_BASE = "appExecJobSearch"; // placeholder — override via ?base=xxx
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");

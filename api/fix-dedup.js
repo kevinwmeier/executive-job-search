@@ -1,4 +1,9 @@
 /**
+ * OBSOLETE - DO NOT RUN. Roles are no longer stored in Airtable; they live in a
+ * Google Sheet behind an Apps Script web app (see NOTES.md). The DeDupe nodes now call
+ * the web app's ?action=getUrls, and this endpoint would overwrite them with
+ * Airtable code and break dedup. Safe to delete this file.
+ *
  * Fixes the DeDupe node in all scraper workflows.
  *
  * Problem: The current DeDupe code makes ONE Airtable API call per job URL

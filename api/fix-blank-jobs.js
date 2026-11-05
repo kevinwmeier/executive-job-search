@@ -1,12 +1,16 @@
 /**
- * Stops scrapers pushing blank/untitled rows to the Google Sheet.
+ * Stops the daily blank row in the Google Sheet.
  *
- * Each scraper's DeDupe code node drops items with no URL but lets through
- * items that have a URL and no title. This adds a title check to those nodes
- * and reports which scraper produced blank items in recent executions.
+ * Cause: some DeDupe nodes have "Always Output Data" on, so an empty DeDupe result still
+ * emits one {} item. Batch Roles then posts { roles: [{}] } and the Apps Script appends a
+ * row with only id / Status / FetchedDate.
  *
- * GET              -> dry run: report DeDupe/save nodes, guard status, blank items seen in recent runs
- * POST (or ?dry=false) -> apply the title guard to every DeDupe node missing it
+ * Fix, per workflow:
+ *   1. Turn off alwaysOutputData on any node that has it.
+ *   2. Make Batch Roles drop items with no url or title before building { roles: [...] }.
+ *
+ * GET              -> dry run (reports what would change and what recent runs actually emitted)
+ * POST (or ?dry=false) -> apply
  */
 
 const N8N_BASE = "https://n8n-production-97a9.up.railway.app";
@@ -29,29 +33,19 @@ const SAFE_SETTING_KEYS = [
   "saveDataErrorExecution", "saveDataSuccessExecution",
 ];
 
+const NEW_BATCH_CODE = `const items = $input.all().filter(i => {
+  const j = i.json || {};
+  return j.url && String(j.title || j.Title || '').trim();
+});
+if (items.length === 0) return [];
+return [{ json: { roles: items.map(i => i.json) } }];`;
+
 const codeOf = (n) => n.parameters?.jsCode || n.parameters?.functionCode || "";
 
-function isDedupeNode(n) {
-  if (n.type !== "n8n-nodes-base.code") return false;
-  const code = codeOf(n);
-  return code.includes("existingUrls") && code.includes("action=getUrls");
-}
+const isBatchNode = (n) =>
+  n.type === "n8n-nodes-base.code" && /batch/i.test(n.name) && codeOf(n).includes("roles:");
 
-function hasTitleGuard(code) {
-  return /\.trim\(\)\s*\)\s*continue/.test(code) || code.includes("// title guard");
-}
-
-const GUARD_RE = /(const url = item\.json\.url;[ \t]*\n)([ \t]*)if \(!url\) continue;/;
-
-function injectTitleGuard(code) {
-  return code.replace(
-    GUARD_RE,
-    (_, head, indent) =>
-      `${head}${indent}// title guard: skip untitled items\n` +
-      `${indent}const title = String(item.json.title || item.json.Title || '').trim();\n` +
-      `${indent}if (!url || !title) continue;`
-  );
-}
+const batchAlreadyGuarded = (n) => codeOf(n).includes(".filter(");
 
 async function n8n(path, options = {}) {
   return fetch(`${N8N_BASE}/api/v1${path}`, {
@@ -64,29 +58,37 @@ async function n8n(path, options = {}) {
   });
 }
 
-// Looks at recent successful runs for items leaving a node with a url but no title.
-async function findBlankItems(workflowId) {
-  const listRes = await n8n(`/executions?workflowId=${workflowId}&status=success&limit=3`);
+// Checks what Batch Roles actually emitted in recent successful runs, so we can confirm
+// the field names the new filter relies on (url, title) match what each scraper produces.
+async function sampleBatchOutput(workflowId, batchName) {
+  const listRes = await n8n(`/executions?workflowId=${workflowId}&status=success&limit=5`);
   if (!listRes.ok) return { error: `executions list ${listRes.status}` };
   const list = (await listRes.json()).data || [];
-  const hits = [];
+  let emptyRoles = 0;
+  let withTitleAndUrl = 0;
+  let total = 0;
+  const keys = new Set();
   for (const ex of list) {
-    const detRes = await n8n(`/executions/${ex.id}?includeData=true`);
-    if (!detRes.ok) continue;
-    const det = await detRes.json();
-    const runData = det.data?.resultData?.runData || {};
-    for (const [node, runs] of Object.entries(runData)) {
-      for (const run of runs || []) {
-        for (const item of run.data?.main?.[0] || []) {
-          const j = item.json || {};
-          if (j.url && !String(j.title || j.Title || "").trim()) {
-            hits.push({ executionId: ex.id, node, url: j.url, fields: Object.keys(j) });
-          }
-        }
+    const r = await n8n(`/executions/${ex.id}?includeData=true`);
+    if (!r.ok) continue;
+    const det = await r.json();
+    const out = det.data?.resultData?.runData?.[batchName]?.[0]?.data?.main?.[0] || [];
+    for (const item of out) {
+      for (const role of item.json?.roles || []) {
+        total++;
+        Object.keys(role).forEach((k) => keys.add(k));
+        if (!Object.keys(role).length) emptyRoles++;
+        else if (role.url && String(role.title || role.Title || "").trim()) withTitleAndUrl++;
       }
     }
   }
-  return { executionsChecked: list.length, blankItems: hits.slice(0, 10) };
+  return {
+    executionsChecked: list.length,
+    rolesSeen: total,
+    emptyRoles,
+    rolesPassingNewFilter: withTitleAndUrl,
+    fieldNames: [...keys],
+  };
 }
 
 export default async function handler(req, res) {
@@ -100,7 +102,7 @@ export default async function handler(req, res) {
   const results = [];
 
   for (const scraper of SCRAPER_IDS) {
-    const result = { id: scraper.id, name: scraper.name, status: "unknown" };
+    const result = { id: scraper.id, name: scraper.name, active: null, changes: [], status: "unknown" };
     try {
       const wfRes = await n8n(`/workflows/${scraper.id}`);
       if (!wfRes.ok) {
@@ -109,43 +111,40 @@ export default async function handler(req, res) {
         continue;
       }
       const wf = await wfRes.json();
+      result.active = wf.active;
       const nodes = wf.nodes || [];
 
-      result.saveNodes = nodes
-        .filter((n) => JSON.stringify(n.parameters || {}).includes("script.google.com"))
-        .map((n) => ({ name: n.name, type: n.type.split(".").pop() }));
-
-      const dedupe = nodes.find(isDedupeNode);
-      if (!dedupe) {
-        result.status = "no_sheets_dedupe_node";
-        result.codeNodes = nodes
-          .filter((n) => n.type === "n8n-nodes-base.code")
-          .map((n) => ({ name: n.name, snippet: codeOf(n).slice(0, 200) }));
+      const batch = nodes.find(isBatchNode);
+      if (!batch) {
+        result.status = "no_batch_node";
         results.push(result);
         continue;
       }
 
-      const code = codeOf(dedupe);
-      result.dedupeNode = dedupe.name;
-      result.hasTitleGuard = hasTitleGuard(code);
-      result.blankItemsSeen = await findBlankItems(scraper.id).catch((e) => ({ error: e.message }));
+      const updatedNodes = nodes.map((n) => {
+        let out = n;
+        if (n.alwaysOutputData === true) {
+          result.changes.push(`turn off alwaysOutputData on "${n.name}"`);
+          out = { ...out, alwaysOutputData: false };
+        }
+        if (n.name === batch.name && !batchAlreadyGuarded(n)) {
+          result.changes.push(`add url/title filter to "${n.name}"`);
+          out = { ...out, parameters: { ...out.parameters, jsCode: NEW_BATCH_CODE } };
+        }
+        return out;
+      });
 
-      if (result.hasTitleGuard) {
-        result.status = "already_guarded";
+      result.recentBatchOutput = await sampleBatchOutput(scraper.id, batch.name).catch((e) => ({
+        error: e.message,
+      }));
+
+      if (!result.changes.length) {
+        result.status = "already_fixed";
         results.push(result);
         continue;
       }
-
-      const newCode = injectTitleGuard(code);
-      if (newCode === code) {
-        result.status = "pattern_mismatch";
-        result.dedupeSnippet = code.slice(-300);
-        results.push(result);
-        continue;
-      }
-
       if (dryRun) {
-        result.status = "needs_fix";
+        result.status = "would_fix";
         results.push(result);
         continue;
       }
@@ -154,10 +153,6 @@ export default async function handler(req, res) {
       for (const k of SAFE_SETTING_KEYS) {
         if (wf.settings?.[k] !== undefined) safeSettings[k] = wf.settings[k];
       }
-      const updatedNodes = nodes.map((n) =>
-        n.name === dedupe.name ? { ...n, parameters: { ...n.parameters, jsCode: newCode } } : n
-      );
-
       if (wf.active) await n8n(`/workflows/${scraper.id}/deactivate`, { method: "POST" });
       const putRes = await n8n(`/workflows/${scraper.id}`, {
         method: "PUT",
@@ -170,11 +165,9 @@ export default async function handler(req, res) {
       });
       if (wf.active) await n8n(`/workflows/${scraper.id}/activate`, { method: "POST" });
 
-      if (!putRes.ok) {
-        result.status = `put_failed: ${(await putRes.text().catch(() => "")).slice(0, 200)}`;
-      } else {
-        result.status = "fixed";
-      }
+      result.status = putRes.ok
+        ? "fixed"
+        : `put_failed: ${(await putRes.text().catch(() => "")).slice(0, 200)}`;
       results.push(result);
     } catch (e) {
       result.status = `error: ${e.message}`;
@@ -185,12 +178,7 @@ export default async function handler(req, res) {
   const count = (s) => results.filter((r) => r.status === s).length;
   return res.status(200).json({
     dryRun,
-    summary: dryRun
-      ? `${count("needs_fix")} need the guard, ${count("already_guarded")} already guarded, ${count("no_sheets_dedupe_node") + count("pattern_mismatch")} need manual review`
-      : `${count("fixed")} fixed, ${count("already_guarded")} already guarded, ${count("no_sheets_dedupe_node") + count("pattern_mismatch")} need manual review`,
-    culprits: results
-      .filter((r) => r.blankItemsSeen?.blankItems?.length)
-      .map((r) => ({ name: r.name, blankItems: r.blankItemsSeen.blankItems })),
+    summary: `${count(dryRun ? "would_fix" : "fixed")} ${dryRun ? "would be changed" : "fixed"}, ${count("already_fixed")} already fixed, ${results.length - count(dryRun ? "would_fix" : "fixed") - count("already_fixed")} other`,
     results,
   });
 }

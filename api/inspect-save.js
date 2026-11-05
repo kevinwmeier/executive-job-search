@@ -33,6 +33,19 @@ export default async function handler(req, res) {
       out.push({
         name: s.name,
         order: nodes.map((n) => n.name),
+        active: wf.active,
+        nodeFlags: nodes
+          .map((n) => ({
+            name: n.name,
+            alwaysOutputData: n.alwaysOutputData,
+            executeOnce: n.executeOnce,
+            onError: n.onError,
+            continueOnFail: n.continueOnFail,
+            retryOnFail: n.retryOnFail,
+            disabled: n.disabled,
+            mode: n.parameters?.mode,
+          }))
+          .filter((f) => Object.entries(f).some(([k, v]) => k !== "name" && v !== undefined && v !== false)),
         connections: Object.fromEntries(
           Object.entries(wf.connections || {}).map(([k, v]) => [k, (v.main?.[0] || []).map((c) => c.node)])
         ),
